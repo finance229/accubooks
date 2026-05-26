@@ -11,6 +11,7 @@ import Invoices from './pages/Invoices';
 import PaymentRequests from './pages/PaymentRequests';
 import FixedAssets from './pages/FixedAssets';
 import Settings from './pages/Settings';
+import Projects from './pages/Projects';  
 import Layout from './components/Layout';
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
           <Route path="payment-requests" element={<PaymentRequests />} />
           <Route path="fixed-assets" element={<FixedAssets />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="projects" element={<Projects />} />
         </Route>
       </Routes>
     </BrowserRouter>

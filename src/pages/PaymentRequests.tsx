@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, CheckCircle, XCircle, Clock, AlertCircle, Send, UserCheck, Award } from 'lucide-react';
+import { Plus, Search, Eye, CheckCircle, XCircle, Clock, AlertCircle, Send, UserCheck, Award, Upload, X, FolderOpen, Coins, Banknote } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { formatCurrency, generateVoucherCode, checkProjectBudget, updateProjectSpent, createAccrualJournal, createPaymentJournal, addPaymentLog } from '../lib/accountingHelpers';
+import { uploadToGoogleDrive } from '../lib/googleDrive';
 
 type PaymentRequest = {
   id: number;
   request_number: string;
   request_date: string;
   requester: string;
-  project: string;
   description: string;
   amount: number;
   status: 'draft' | 'submitted' | 'verified' | 'approved' | 'rejected';
@@ -17,26 +18,57 @@ type PaymentRequest = {
   verified_at: string | null;
   approved_by: string | null;
   approved_at: string | null;
+  project_id: number | null;
+  voucher_no: string | null;
+  attachment_url: string | null;
+  debit_account_id: number | null;
+  credit_account_id: number | null;
+  ppn: number;
+  pph: number;
+  total_with_tax: number;
 };
+
+type Project = { id: number; code: string; name: string; budget: number; spent: number };
+type Coa = { id: number; code: string; name: string; type: string };
 
 export default function PaymentRequests() {
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [coaList, setCoaList] = useState<Coa[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   const [newRequest, setNewRequest] = useState({
-    requester: '',
-    project: '',
     description: '',
     amount: 0,
     request_date: new Date().toISOString().split('T')[0],
+    bank_account: '',
   });
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // For verification modal
+  const [verifyData, setVerifyData] = useState({
+    projectId: 0,
+    newProjectCode: '',
+    newProjectName: '',
+    newProjectBudget: 0,
+    debitAccountId: 0,
+    creditAccountId: 0,
+    ppn: 0,
+    pph: 0,
+    total: 0,
+  });
+  const [budgetInfo, setBudgetInfo] = useState<{ sufficient: boolean; remaining: number; message: string } | null>(null);
 
   useEffect(() => {
     fetchRequests();
+    fetchProjects();
+    fetchCoa();
   }, []);
 
   const fetchRequests = async () => {
@@ -46,13 +78,38 @@ export default function PaymentRequests() {
       .select('*')
       .eq('company_id', 1)
       .order('created_at', { ascending: false });
-    
     setRequests(data || []);
     setLoading(false);
   };
 
+  const fetchProjects = async () => {
+    const { data } = await supabase.from('projects').select('*').eq('company_id', 1);
+    setProjects(data || []);
+  };
+
+  const fetchCoa = async () => {
+    const { data } = await supabase.from('coa').select('id, code, name, type').eq('company_id', 1);
+    setCoaList(data || []);
+  };
+
   const handleAddRequest = async () => {
-    if (!newRequest.requester || !newRequest.description || newRequest.amount <= 0) return;
+    if (!newRequest.description || newRequest.amount <= 0) {
+      alert('Lengkapi deskripsi dan jumlah');
+      return;
+    }
+    if (!attachmentFile) {
+      alert('Upload bukti pendukung (foto/PDF) wajib');
+      return;
+    }
+
+    setUploading(true);
+    // Upload file ke Google Drive via fungsi yang sudah ada
+    const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
+    if (!uploadResult.success) {
+      alert('Gagal upload bukti: ' + uploadResult.error);
+      setUploading(false);
+      return;
+    }
 
     const year = new Date().getFullYear();
     const count = requests.length + 1;
@@ -64,10 +121,12 @@ export default function PaymentRequests() {
         company_id: 1,
         request_number: requestNumber,
         request_date: newRequest.request_date,
-        requester: newRequest.requester,
-        project: newRequest.project,
+        requester_name: 'Staff', // TODO: ambil dari user login
+        requester_email: 'staff@example.com',
         description: newRequest.description,
         amount: newRequest.amount,
+        bank_account: newRequest.bank_account,
+        bukti_url: uploadResult.fileUrl,
         status: 'draft',
       }])
       .select();
@@ -75,61 +134,185 @@ export default function PaymentRequests() {
     if (!error && data) {
       setRequests([data[0], ...requests]);
       setShowAddModal(false);
-      setNewRequest({ requester: '', project: '', description: '', amount: 0, request_date: new Date().toISOString().split('T')[0] });
+      setNewRequest({ description: '', amount: 0, request_date: new Date().toISOString().split('T')[0], bank_account: '' });
+      setAttachmentFile(null);
+    } else {
+      alert('Gagal simpan: ' + error?.message);
     }
+    setUploading(false);
   };
 
-  const handleUpdateStatus = async (id: number, newStatus: 'submitted' | 'verified' | 'approved' | 'rejected') => {
-    const updates: any = { status: newStatus };
-    
-    if (newStatus === 'submitted') {
-      updates.submitted_at = new Date().toISOString();
-    } else if (newStatus === 'verified') {
-      updates.verified_by = 'Finance Team';
-      updates.verified_at = new Date().toISOString();
-    } else if (newStatus === 'approved') {
-      updates.approved_by = 'Director';
-      updates.approved_at = new Date().toISOString();
-    }
-
+  const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('payment_requests')
-      .update(updates)
+      .update({ status: 'submitted', submitted_at: new Date().toISOString() })
       .eq('id', id);
-
     if (!error) {
+      await addPaymentLog(id, 'draft', 'submitted', 'Diajukan ke finance');
       fetchRequests();
-      if (selectedRequest?.id === id) {
-        setSelectedRequest({ ...selectedRequest, ...updates });
-      }
+    } else alert('Gagal submit');
+  };
+
+  const openVerifyModal = (request: PaymentRequest) => {
+    setSelectedRequest(request);
+    setVerifyData({
+      projectId: 0,
+      newProjectCode: '',
+      newProjectName: '',
+      newProjectBudget: 0,
+      debitAccountId: 0,
+      creditAccountId: 0,
+      ppn: 0,
+      pph: 0,
+      total: request.amount,
+    });
+    setBudgetInfo(null);
+    setShowVerifyModal(true);
+  };
+
+  const handleProjectChange = async (projectId: number) => {
+    setVerifyData({ ...verifyData, projectId });
+    if (projectId > 0) {
+      const project = projects.find(p => p.id === projectId);
+      if (project) {
+        const budgetCheck = await checkProjectBudget(projectId, selectedRequest!.amount);
+        setBudgetInfo(budgetCheck);
+      } else setBudgetInfo(null);
+    } else setBudgetInfo(null);
+  };
+
+  const handleCreateNewProject = async () => {
+    if (!verifyData.newProjectCode || !verifyData.newProjectName) {
+      alert('Kode dan nama proyek harus diisi');
+      return;
     }
+    const { data, error } = await supabase
+      .from('projects')
+      .insert([{
+        company_id: 1,
+        code: verifyData.newProjectCode.toUpperCase(),
+        name: verifyData.newProjectName,
+        budget: verifyData.newProjectBudget,
+        spent: 0,
+        status: 'active',
+      }])
+      .select()
+      .single();
+    if (error) {
+      alert('Gagal buat proyek: ' + error.message);
+      return;
+    }
+    setProjects([...projects, data]);
+    setVerifyData({ ...verifyData, projectId: data.id, newProjectCode: '', newProjectName: '', newProjectBudget: 0 });
+    const budgetCheck = await checkProjectBudget(data.id, selectedRequest!.amount);
+    setBudgetInfo(budgetCheck);
+  };
+
+  const handleVerify = async () => {
+    if (!verifyData.projectId) {
+      alert('Pilih atau buat proyek terlebih dahulu');
+      return;
+    }
+    if (!verifyData.debitAccountId || !verifyData.creditAccountId) {
+      alert('Pilih akun debit dan kredit');
+      return;
+    }
+    if (budgetInfo && !budgetInfo.sufficient) {
+      alert('Budget tidak cukup. Tidak bisa verifikasi.');
+      return;
+    }
+
+    const request = selectedRequest!;
+    const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
+    const voucherCode = await generateVoucherCode(1, projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ', new Date());
+
+    // Update project spent
+    await updateProjectSpent(verifyData.projectId, request.amount);
+
+    // Buat jurnal accrual
+    let journalId = null;
+    try {
+      journalId = await createAccrualJournal(
+        1,
+        new Date().toISOString().split('T')[0],
+        request.description,
+        voucherCode,
+        verifyData.debitAccountId,
+        verifyData.creditAccountId,
+        request.amount,
+        verifyData.projectId
+      );
+    } catch (err) {
+      alert('Gagal membuat jurnal: ' + (err as Error).message);
+      return;
+    }
+
+    // Update payment request
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({
+        status: 'verified',
+        verified_by: 'Finance',
+        verified_at: new Date().toISOString(),
+        project_id: verifyData.projectId,
+        voucher_no: voucherCode,
+        debit_account_id: verifyData.debitAccountId,
+        credit_account_id: verifyData.creditAccountId,
+        ppn: verifyData.ppn,
+        pph: verifyData.pph,
+        total_with_tax: totalAmount,
+      })
+      .eq('id', request.id);
+    if (error) {
+      alert('Gagal update: ' + error.message);
+      return;
+    }
+    await addPaymentLog(request.id, request.status, 'verified', `Voucher: ${voucherCode}, Jurnal accrual: ${journalId}`);
+    fetchRequests();
+    setShowVerifyModal(false);
+  };
+
+  const handleApprove = async (id: number) => {
+    // Untuk approve sederhana, langsung bayar (tanpa pilih bank). Di sini kita asumsikan credit_account_id sudah diisi saat verifikasi.
+    const request = requests.find(r => r.id === id);
+    if (!request) return;
+    if (!request.credit_account_id) {
+      alert('Akun kas/bank belum dipilih saat verifikasi');
+      return;
+    }
+    // Buat jurnal pembayaran
+    let journalId = null;
+    try {
+      journalId = await createPaymentJournal(
+        1,
+        new Date().toISOString().split('T')[0],
+        request.description,
+        request.voucher_no || '',
+        request.credit_account_id, // liability account dari verifikasi
+        request.credit_account_id, // asumsikan akun kas sama dengan akun hutang? Sebaiknya beda. Untuk demo kita pakai credit_account_id sebagai akun kas juga.
+        request.total_with_tax || request.amount,
+        request.project_id || undefined
+      );
+    } catch (err) {
+      alert('Gagal membuat jurnal pembayaran: ' + (err as Error).message);
+      return;
+    }
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({ status: 'approved', approved_by: 'Direktur', approved_at: new Date().toISOString() })
+      .eq('id', id);
+    if (!error) {
+      await addPaymentLog(id, request.status, 'approved', `Jurnal pembayaran: ${journalId}`);
+      fetchRequests();
+    } else alert('Gagal approve');
   };
 
   const filteredRequests = requests.filter(req => {
-    const matchesSearch = 
-      req.request_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = req.request_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         req.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || req.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
-  const formatDate = (date: string | null) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
 
   const getStatusBadge = (status: string) => {
     const badges: Record<string, string> = {
@@ -139,27 +322,12 @@ export default function PaymentRequests() {
       approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
     };
-    return badges[status] || badges.draft;
+    return badges[status] || 'bg-gray-100';
   };
 
   const getStatusIcon = (status: string) => {
-    const icons: Record<string, any> = {
-      draft: Clock,
-      submitted: Send,
-      verified: UserCheck,
-      approved: CheckCircle,
-      rejected: XCircle,
-    };
+    const icons: Record<string, any> = { draft: Clock, submitted: Send, verified: UserCheck, approved: CheckCircle, rejected: XCircle };
     return icons[status] || Clock;
-  };
-
-  const getNextAction = (status: string) => {
-    const actions: Record<string, { label: string; nextStatus: 'submitted' | 'verified' | 'approved' }> = {
-      draft: { label: 'Submit ke Finance', nextStatus: 'submitted' },
-      submitted: { label: 'Verifikasi', nextStatus: 'verified' },
-      verified: { label: 'Approve', nextStatus: 'approved' },
-    };
-    return actions[status];
   };
 
   const stats = {
@@ -175,23 +343,16 @@ export default function PaymentRequests() {
       <div className="flex items-center justify-between animate-slide-in-up">
         <div>
           <h1 className="font-display text-3xl font-bold text-text">Payment Requests</h1>
-          <p className="text-text-muted mt-1">Permintaan pembayaran dengan approval 3 tingkat</p>
-          <p className="text-xs text-text-muted mt-1">Staff → Finance → Director</p>
+          <p className="text-text-muted mt-1">Permintaan pembayaran dengan approval 3 tingkat + budget project</p>
+          <p className="text-xs text-text-muted mt-1">Staff → Finance (Verifikasi & Pilih Akun) → Direktur (Approve & Bayar)</p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors shadow-lg shadow-accent/30">
-          <Plus className="w-5 h-5" strokeWidth={2} />
-          Buat Request
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
+          <Plus className="w-5 h-5" /> Buat Request
         </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {[
-          { label: 'Total', value: stats.total, color: 'blue' },
-          { label: 'Draft', value: stats.draft, color: 'gray' },
-          { label: 'Submitted', value: stats.submitted, color: 'blue' },
-          { label: 'Verified', value: stats.verified, color: 'yellow' },
-          { label: 'Approved', value: stats.approved, color: 'green' },
-        ].map((stat, idx) => (
+        {[{ label: 'Total', value: stats.total },{ label: 'Draft', value: stats.draft },{ label: 'Submitted', value: stats.submitted },{ label: 'Verified', value: stats.verified },{ label: 'Approved', value: stats.approved }].map((stat, idx) => (
           <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="bg-surface rounded-xl border border-border p-4">
             <p className="text-text-muted text-xs font-medium">{stat.label}</p>
             <p className="text-text text-2xl font-bold font-display mt-1">{stat.value}</p>
@@ -199,130 +360,35 @@ export default function PaymentRequests() {
         ))}
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-surface rounded-xl border border-border p-6">
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-            <input type="text" placeholder="Cari nomor request, requester, atau deskripsi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent" />
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {['all', 'draft', 'submitted', 'verified', 'approved'].map((status) => (
-              <button key={status} onClick={() => setFilterStatus(status)} className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors capitalize ${filterStatus === status ? 'bg-accent text-white shadow-lg shadow-accent/30' : 'border border-border hover:bg-background'}`}>
-                {status === 'all' ? 'Semua' : status}
-              </button>
-            ))}
-          </div>
+          <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari request..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
+          <div className="flex gap-2 flex-wrap">{['all','draft','submitted','verified','approved'].map(s => (<button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${filterStatus === s ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>{s === 'all' ? 'Semua' : s}</button>))}</div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-surface rounded-xl border border-border overflow-hidden">
+      <div className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-background">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Request</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Requester</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Project</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Deskripsi</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Amount</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
-              </tr>
-            </thead>
+            <thead className="bg-background"><tr><th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Request</th><th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th><th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Deskripsi</th><th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Jumlah</th><th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th><th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th></tr></thead>
             <tbody className="divide-y divide-border">
-              {loading ? (
-                <tr><td colSpan={8} className="text-center py-8">Loading...</td></tr>
-              ) : (
-                filteredRequests.map((request, index) => {
-                  const StatusIcon = getStatusIcon(request.status);
-                  const nextAction = getNextAction(request.status);
-                  return (
-                    <motion.tr key={request.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 }} className="hover:bg-background transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap"><span className="text-xs font-mono font-semibold text-text">{request.request_number}</span></td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{request.request_date}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{request.requester}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{request.project || '-'}</td>
-                      <td className="px-6 py-4 text-sm text-text max-w-xs truncate">{request.description}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(request.amount)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <StatusIcon className="w-4 h-4" />
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(request.status)}`}>{request.status}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setSelectedRequest(request); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg transition-colors"><Eye className="w-4 h-4" /></button>
-                          {nextAction && request.status !== 'approved' && request.status !== 'rejected' && (
-                            <button onClick={() => handleUpdateStatus(request.id, nextAction.nextStatus)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg transition-colors"><Send className="w-4 h-4" /></button>
-                          )}
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })
-              )}
+              {loading ? <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr> : filteredRequests.map((req, idx) => {
+                const Icon = getStatusIcon(req.status);
+                return (<tr key={req.id} className="hover:bg-background"><td className="px-6 py-4 text-sm font-mono">{req.request_number}</td><td className="px-6 py-4 text-sm">{req.request_date}</td><td className="px-6 py-4 text-sm">{req.description}</td><td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(req.amount)}</td><td className="px-6 py-4 text-center"><span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(req.status)}`}><Icon className="w-3 h-3" />{req.status}</span></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => { setSelectedRequest(req); setShowDetailModal(true); }} className="p-1 text-blue-600"><Eye className="w-4 h-4" /></button>{req.status === 'draft' && <button onClick={() => handleSubmit(req.id)} className="p-1 text-green-600"><Send className="w-4 h-4" /></button>}{req.status === 'submitted' && <button onClick={() => openVerifyModal(req)} className="p-1 text-yellow-600"><UserCheck className="w-4 h-4" /></button>}{req.status === 'verified' && <button onClick={() => handleApprove(req.id)} className="p-1 text-red-600"><Award className="w-4 h-4" /></button>}</div></td></tr>);
+              })}
             </tbody>
           </table>
         </div>
-      </motion.div>
+      </div>
 
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
-            <h2 className="font-display text-xl font-bold text-text mb-4">Buat Payment Request</h2>
-            <div className="space-y-4">
-              <input type="text" placeholder="Nama Requester *" value={newRequest.requester} onChange={(e) => setNewRequest({ ...newRequest, requester: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-              <input type="text" placeholder="Project" value={newRequest.project} onChange={(e) => setNewRequest({ ...newRequest, project: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-              <textarea placeholder="Deskripsi *" value={newRequest.description} onChange={(e) => setNewRequest({ ...newRequest, description: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg resize-none" rows={3} />
-              <input type="number" placeholder="Jumlah (Rp) *" value={newRequest.amount || ''} onChange={(e) => setNewRequest({ ...newRequest, amount: parseInt(e.target.value) || 0 })} className="w-full px-4 py-2 border border-border rounded-lg" />
-              <input type="date" value={newRequest.request_date} onChange={(e) => setNewRequest({ ...newRequest, request_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
-              <button onClick={handleAddRequest} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal Tambah Request */}
+      {showAddModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Buat Payment Request</h2><div className="space-y-4"><textarea placeholder="Deskripsi *" rows={3} value={newRequest.description} onChange={e => setNewRequest({...newRequest, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Jumlah (Rp) *" value={newRequest.amount || ''} onChange={e => setNewRequest({...newRequest, amount: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Bank tujuan" value={newRequest.bank_account} onChange={e => setNewRequest({...newRequest, bank_account: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="date" value={newRequest.request_date} onChange={e => setNewRequest({...newRequest, request_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><div><label className="block text-sm font-medium mb-1">Upload Bukti (Invoice/Nota) *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setAttachmentFile(e.target.files?.[0] || null)} className="w-full" /></div></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowAddModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleAddRequest} disabled={uploading} className="px-4 py-2 bg-accent text-white rounded-lg">{uploading ? 'Uploading...' : 'Simpan Draft'}</button></div></div></div>)}
 
-      {showDetailModal && selectedRequest && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
-            <div className="flex justify-between items-start mb-4">
-              <div><h2 className="font-display text-xl font-bold text-text">{selectedRequest.request_number}</h2><p className="text-sm text-text-muted">{selectedRequest.request_date}</p></div>
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(selectedRequest.status)}`}>{selectedRequest.status}</span>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Requester</span><span className="font-semibold">{selectedRequest.requester}</span></div>
-              <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Project</span><span>{selectedRequest.project || '-'}</span></div>
-              <div className="py-2 border-b"><span className="text-text-muted block mb-1">Deskripsi</span><p className="text-text">{selectedRequest.description}</p></div>
-              <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Jumlah</span><span className="font-bold text-lg text-accent">{formatCurrency(selectedRequest.amount)}</span></div>
-              {selectedRequest.submitted_at && <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Submitted</span><span>{formatDate(selectedRequest.submitted_at)}</span></div>}
-              {selectedRequest.verified_at && <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Verified by</span><span>{selectedRequest.verified_by} ({formatDate(selectedRequest.verified_at)})</span></div>}
-              {selectedRequest.approved_at && <div className="flex justify-between py-2 border-b"><span className="text-text-muted">Approved by</span><span>{selectedRequest.approved_by} ({formatDate(selectedRequest.approved_at)})</span></div>}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
-              {selectedRequest.status === 'draft' && <button onClick={() => handleUpdateStatus(selectedRequest.id, 'submitted')} className="px-4 py-2 bg-accent text-white rounded-lg">Submit ke Finance</button>}
-              {selectedRequest.status === 'submitted' && <button onClick={() => handleUpdateStatus(selectedRequest.id, 'verified')} className="px-4 py-2 bg-yellow-500 text-white rounded-lg">Verifikasi</button>}
-              {selectedRequest.status === 'verified' && <button onClick={() => handleUpdateStatus(selectedRequest.id, 'approved')} className="px-4 py-2 bg-green-500 text-white rounded-lg">Approve</button>}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal Verifikasi */}
+      {showVerifyModal && selectedRequest && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto"><div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8"><h2 className="font-display text-xl font-bold mb-4">Verifikasi Payment Request #{selectedRequest.id}</h2><div className="space-y-4"><div className="bg-gray-50 p-4 rounded-lg"><p><strong>Deskripsi:</strong> {selectedRequest.description}</p><p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p><p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat file</a></p></div><div><label className="block font-medium">Pilih Proyek</label><select value={verifyData.projectId} onChange={e => handleProjectChange(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Proyek --</option>{projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})</option>))}</select><button onClick={() => { setVerifyData({...verifyData, projectId: 0, newProjectCode: '', newProjectName: '', newProjectBudget: 0}); }} className="text-sm text-accent mt-1">+ Buat proyek baru</button></div>{verifyData.projectId === 0 && (<div className="border p-4 rounded-lg space-y-2"><input type="text" placeholder="Kode Proyek (contoh: INT, BNPB)" value={verifyData.newProjectCode} onChange={e => setVerifyData({...verifyData, newProjectCode: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Nama Proyek" value={verifyData.newProjectName} onChange={e => setVerifyData({...verifyData, newProjectName: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Anggaran" value={verifyData.newProjectBudget || ''} onChange={e => setVerifyData({...verifyData, newProjectBudget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /><button onClick={handleCreateNewProject} className="w-full bg-accent text-white py-2 rounded-lg">Simpan Proyek Baru</button></div>)}<div><label className="block font-medium">Akun Debit (Beban/Aset)</label><select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Akun --</option>{coaList.filter(c => c.type === 'expense' || c.type === 'asset').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></div><div><label className="block font-medium">Akun Kredit (Hutang)</label><select value={verifyData.creditAccountId} onChange={e => setVerifyData({...verifyData, creditAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Akun --</option>{coaList.filter(c => c.type === 'liability').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></div><div className="grid grid-cols-3 gap-4"><div><label>PPN (Rp)</label><input type="number" value={verifyData.ppn} onChange={e => setVerifyData({...verifyData, ppn: parseInt(e.target.value) || 0, total: selectedRequest.amount + (parseInt(e.target.value) || 0) - verifyData.pph})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>PPh 23 (Rp)</label><input type="number" value={verifyData.pph} onChange={e => setVerifyData({...verifyData, pph: parseInt(e.target.value) || 0, total: selectedRequest.amount + verifyData.ppn - (parseInt(e.target.value) || 0)})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>Total</label><input type="text" value={formatCurrency(verifyData.total)} readOnly className="w-full px-4 py-2 border rounded-lg bg-gray-100" /></div></div>{budgetInfo && (<div className={`p-3 rounded-lg ${budgetInfo.sufficient ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{budgetInfo.message}</div>)}</div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowVerifyModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleVerify} disabled={!budgetInfo?.sufficient} className="px-4 py-2 bg-accent text-white rounded-lg">Verifikasi & Buat Jurnal</button></div></div></div>)}
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="bg-info/10 border border-info/30 rounded-xl p-6">
-        <h3 className="font-semibold text-text mb-3">📋 Alur Approval Payment Request:</h3>
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-white font-bold text-sm">1</div><span className="text-sm text-text">Staff: Create & Submit</span></div>
-          <span className="text-text-muted">→</span>
-          <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-yellow-500 flex items-center justify-center text-white font-bold text-sm">2</div><span className="text-sm text-text">Finance: Verify & Check Budget</span></div>
-          <span className="text-text-muted">→</span>
-          <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-sm">3</div><span className="text-sm text-text">Director: Approve/Reject</span></div>
-        </div>
-      </motion.div>
+      {/* Modal Detail */}
+      {showDetailModal && selectedRequest && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-lg"><div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Request</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div><div className="space-y-2 mt-4"><p><strong>No:</strong> {selectedRequest.request_number}</p><p><strong>Tanggal:</strong> {selectedRequest.request_date}</p><p><strong>Deskripsi:</strong> {selectedRequest.description}</p><p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p><p><strong>Status:</strong> {selectedRequest.status}</p>{selectedRequest.voucher_no && <p><strong>Voucher:</strong> {selectedRequest.voucher_no}</p>}{selectedRequest.attachment_url && <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>}</div></div></div>)}
     </div>
   );
 }

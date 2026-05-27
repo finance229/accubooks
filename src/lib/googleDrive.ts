@@ -14,26 +14,30 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
     if (!GAS_UPLOAD_URL) {
       throw new Error('Google Apps Script URL not configured');
     }
+
+    // Convert file to base64
     const base64 = await fileToBase64(file);
-    const payload = {
-      fileName: file.name,
-      fileData: base64,
-      mimeType: file.type,
-      folderId: DRIVE_FOLDER_ID,
-      subFolder: folder || 'documents',
-    };
+    
+    // Kirim sebagai FormData (tidak memicu preflight CORS)
+    const formData = new FormData();
+    formData.append('fileData', base64);
+    formData.append('fileName', file.name);
+    formData.append('mimeType', file.type);
+    formData.append('folderId', DRIVE_FOLDER_ID);
+    formData.append('subFolder', folder || 'documents');
+
     const response = await fetch(GAS_UPLOAD_URL, {
       method: 'POST',
-      body: JSON.stringify(payload),
-      headers: { 'Content-Type': 'application/json' },
+      body: formData,
     });
-    if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
+
     const result = await response.json();
+
     if (result.success) {
       return {
         success: true,
         fileId: result.fileId,
-        fileUrl: result.fileUrl || `https://drive.google.com/file/d/${result.fileId}/view`,
+        fileUrl: result.fileUrl,
         fileName: file.name,
       };
     } else {
@@ -41,7 +45,10 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
     }
   } catch (error) {
     console.error('Error uploading to Google Drive:', error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 }
 

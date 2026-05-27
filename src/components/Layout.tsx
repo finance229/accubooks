@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingUp, FolderOpen } from 'lucide-react';
+import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingUp, FolderOpen, CreditCard, FolderKanban } from 'lucide-react';
 import { useState } from 'react';
 
 const navigation = [

@@ -26,6 +26,9 @@ type PaymentRequest = {
   ppn: number;
   pph: number;
   total_with_tax: number;
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_account_name: string | null;
 };
 
 type Project = { id: number; code: string; name: string; budget: number; spent: number };
@@ -44,14 +47,15 @@ export default function PaymentRequests() {
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   const [newRequest, setNewRequest] = useState({
     description: '',
-    amount: 0,
+    amount: '',
     request_date: new Date().toISOString().split('T')[0],
-    bank_account: '',
+    bank_name: '',
+    bank_account_number: '',
+    bank_account_name: '',
   });
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // For verification modal
   const [verifyData, setVerifyData] = useState({
     projectId: 0,
     newProjectCode: '',
@@ -93,7 +97,7 @@ export default function PaymentRequests() {
   };
 
   const handleAddRequest = async () => {
-    if (!newRequest.description || newRequest.amount <= 0) {
+    if (!newRequest.description || !newRequest.amount) {
       alert('Lengkapi deskripsi dan jumlah');
       return;
     }
@@ -103,7 +107,6 @@ export default function PaymentRequests() {
     }
 
     setUploading(true);
-    // Upload file ke Google Drive via fungsi yang sudah ada
     const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
     if (!uploadResult.success) {
       alert('Gagal upload bukti: ' + uploadResult.error);
@@ -121,11 +124,13 @@ export default function PaymentRequests() {
         company_id: 1,
         request_number: requestNumber,
         request_date: newRequest.request_date,
-        requester_name: 'Staff', // TODO: ambil dari user login
+        requester_name: 'Staff',
         requester_email: 'staff@example.com',
         description: newRequest.description,
-        amount: newRequest.amount,
-        bank_account: newRequest.bank_account,
+        amount: parseInt(newRequest.amount) || 0,
+        bank_name: newRequest.bank_name,
+        bank_account_number: newRequest.bank_account_number,
+        bank_account_name: newRequest.bank_account_name,
         bukti_url: uploadResult.fileUrl,
         status: 'draft',
       }])
@@ -134,7 +139,14 @@ export default function PaymentRequests() {
     if (!error && data) {
       setRequests([data[0], ...requests]);
       setShowAddModal(false);
-      setNewRequest({ description: '', amount: 0, request_date: new Date().toISOString().split('T')[0], bank_account: '' });
+      setNewRequest({
+        description: '',
+        amount: '',
+        request_date: new Date().toISOString().split('T')[0],
+        bank_name: '',
+        bank_account_number: '',
+        bank_account_name: ''
+      });
       setAttachmentFile(null);
     } else {
       alert('Gagal simpan: ' + error?.message);
@@ -172,10 +184,10 @@ export default function PaymentRequests() {
 
   const handleProjectChange = async (projectId: number) => {
     setVerifyData({ ...verifyData, projectId });
-    if (projectId > 0) {
+    if (projectId > 0 && selectedRequest) {
       const project = projects.find(p => p.id === projectId);
       if (project) {
-        const budgetCheck = await checkProjectBudget(projectId, selectedRequest!.amount);
+        const budgetCheck = await checkProjectBudget(projectId, selectedRequest.amount);
         setBudgetInfo(budgetCheck);
       } else setBudgetInfo(null);
     } else setBudgetInfo(null);
@@ -204,11 +216,14 @@ export default function PaymentRequests() {
     }
     setProjects([...projects, data]);
     setVerifyData({ ...verifyData, projectId: data.id, newProjectCode: '', newProjectName: '', newProjectBudget: 0 });
-    const budgetCheck = await checkProjectBudget(data.id, selectedRequest!.amount);
-    setBudgetInfo(budgetCheck);
+    if (selectedRequest) {
+      const budgetCheck = await checkProjectBudget(data.id, selectedRequest.amount);
+      setBudgetInfo(budgetCheck);
+    }
   };
 
   const handleVerify = async () => {
+    if (!selectedRequest) return;
     if (!verifyData.projectId) {
       alert('Pilih atau buat proyek terlebih dahulu');
       return;
@@ -222,14 +237,13 @@ export default function PaymentRequests() {
       return;
     }
 
-    const request = selectedRequest!;
+    const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
-    const voucherCode = await generateVoucherCode(1, projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ', new Date());
+    const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ';
+    const voucherCode = await generateVoucherCode(1, projectCode, new Date());
 
-    // Update project spent
     await updateProjectSpent(verifyData.projectId, request.amount);
 
-    // Buat jurnal accrual
     let journalId = null;
     try {
       journalId = await createAccrualJournal(
@@ -247,7 +261,6 @@ export default function PaymentRequests() {
       return;
     }
 
-    // Update payment request
     const { error } = await supabase
       .from('payment_requests')
       .update({
@@ -273,14 +286,12 @@ export default function PaymentRequests() {
   };
 
   const handleApprove = async (id: number) => {
-    // Untuk approve sederhana, langsung bayar (tanpa pilih bank). Di sini kita asumsikan credit_account_id sudah diisi saat verifikasi.
     const request = requests.find(r => r.id === id);
     if (!request) return;
     if (!request.credit_account_id) {
       alert('Akun kas/bank belum dipilih saat verifikasi');
       return;
     }
-    // Buat jurnal pembayaran
     let journalId = null;
     try {
       journalId = await createPaymentJournal(
@@ -288,8 +299,8 @@ export default function PaymentRequests() {
         new Date().toISOString().split('T')[0],
         request.description,
         request.voucher_no || '',
-        request.credit_account_id, // liability account dari verifikasi
-        request.credit_account_id, // asumsikan akun kas sama dengan akun hutang? Sebaiknya beda. Untuk demo kita pakai credit_account_id sebagai akun kas juga.
+        request.credit_account_id,
+        request.credit_account_id,
         request.total_with_tax || request.amount,
         request.project_id || undefined
       );
@@ -308,8 +319,8 @@ export default function PaymentRequests() {
   };
 
   const filteredRequests = requests.filter(req => {
-    const matchesSearch = req.request_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         req.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = req.request_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         req.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || req.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -336,6 +347,11 @@ export default function PaymentRequests() {
     submitted: requests.filter(r => r.status === 'submitted').length,
     verified: requests.filter(r => r.status === 'verified').length,
     approved: requests.filter(r => r.status === 'approved').length,
+  };
+
+  const formatRupiah = (value: string | number) => {
+    const num = typeof value === 'string' ? parseInt(value) || 0 : value;
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   };
 
   return (
@@ -382,13 +398,112 @@ export default function PaymentRequests() {
       </div>
 
       {/* Modal Tambah Request */}
-      {showAddModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Buat Payment Request</h2><div className="space-y-4"><textarea placeholder="Deskripsi *" rows={3} value={newRequest.description} onChange={e => setNewRequest({...newRequest, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Jumlah (Rp) *" value={newRequest.amount || ''} onChange={e => setNewRequest({...newRequest, amount: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Bank tujuan" value={newRequest.bank_account} onChange={e => setNewRequest({...newRequest, bank_account: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="date" value={newRequest.request_date} onChange={e => setNewRequest({...newRequest, request_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><div><label className="block text-sm font-medium mb-1">Upload Bukti (Invoice/Nota) *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setAttachmentFile(e.target.files?.[0] || null)} className="w-full" /></div></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowAddModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleAddRequest} disabled={uploading} className="px-4 py-2 bg-accent text-white rounded-lg">{uploading ? 'Uploading...' : 'Simpan Draft'}</button></div></div></div>)}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold mb-4">Buat Payment Request</h2>
+            <div className="space-y-4">
+              <textarea placeholder="Deskripsi *" rows={3} value={newRequest.description} onChange={e => setNewRequest({...newRequest, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Jumlah (Rp) *" value={newRequest.amount ? formatRupiah(newRequest.amount) : ''} onChange={e => {
+                const raw = e.target.value.replace(/\./g, '');
+                if (/^\d*$/.test(raw)) {
+                  setNewRequest({...newRequest, amount: raw});
+                }
+              }} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Nama Bank (contoh: BCA, Mandiri, BRI)" value={newRequest.bank_name} onChange={e => setNewRequest({...newRequest, bank_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Nomor Rekening" value={newRequest.bank_account_number} onChange={e => setNewRequest({...newRequest, bank_account_number: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Atas Nama (Pemilik Rekening)" value={newRequest.bank_account_name} onChange={e => setNewRequest({...newRequest, bank_account_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="date" value={newRequest.request_date} onChange={e => setNewRequest({...newRequest, request_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <div>
+                <label className="block text-sm font-medium mb-1">Upload Bukti (Invoice/Nota) *</label>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setAttachmentFile(e.target.files?.[0] || null)} className="w-full" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleAddRequest} disabled={uploading} className="px-4 py-2 bg-accent text-white rounded-lg">{uploading ? 'Uploading...' : 'Simpan Draft'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Verifikasi */}
-      {showVerifyModal && selectedRequest && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto"><div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8"><h2 className="font-display text-xl font-bold mb-4">Verifikasi Payment Request #{selectedRequest.id}</h2><div className="space-y-4"><div className="bg-gray-50 p-4 rounded-lg"><p><strong>Deskripsi:</strong> {selectedRequest.description}</p><p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p><p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat file</a></p></div><div><label className="block font-medium">Pilih Proyek</label><select value={verifyData.projectId} onChange={e => handleProjectChange(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Proyek --</option>{projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})</option>))}</select><button onClick={() => { setVerifyData({...verifyData, projectId: 0, newProjectCode: '', newProjectName: '', newProjectBudget: 0}); }} className="text-sm text-accent mt-1">+ Buat proyek baru</button></div>{verifyData.projectId === 0 && (<div className="border p-4 rounded-lg space-y-2"><input type="text" placeholder="Kode Proyek (contoh: INT, BNPB)" value={verifyData.newProjectCode} onChange={e => setVerifyData({...verifyData, newProjectCode: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Nama Proyek" value={verifyData.newProjectName} onChange={e => setVerifyData({...verifyData, newProjectName: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Anggaran" value={verifyData.newProjectBudget || ''} onChange={e => setVerifyData({...verifyData, newProjectBudget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /><button onClick={handleCreateNewProject} className="w-full bg-accent text-white py-2 rounded-lg">Simpan Proyek Baru</button></div>)}<div><label className="block font-medium">Akun Debit (Beban/Aset)</label><select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Akun --</option>{coaList.filter(c => c.type === 'expense' || c.type === 'asset').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></div><div><label className="block font-medium">Akun Kredit (Hutang)</label><select value={verifyData.creditAccountId} onChange={e => setVerifyData({...verifyData, creditAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Akun --</option>{coaList.filter(c => c.type === 'liability').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></div><div className="grid grid-cols-3 gap-4"><div><label>PPN (Rp)</label><input type="number" value={verifyData.ppn} onChange={e => setVerifyData({...verifyData, ppn: parseInt(e.target.value) || 0, total: selectedRequest.amount + (parseInt(e.target.value) || 0) - verifyData.pph})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>PPh 23 (Rp)</label><input type="number" value={verifyData.pph} onChange={e => setVerifyData({...verifyData, pph: parseInt(e.target.value) || 0, total: selectedRequest.amount + verifyData.ppn - (parseInt(e.target.value) || 0)})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>Total</label><input type="text" value={formatCurrency(verifyData.total)} readOnly className="w-full px-4 py-2 border rounded-lg bg-gray-100" /></div></div>{budgetInfo && (<div className={`p-3 rounded-lg ${budgetInfo.sufficient ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{budgetInfo.message}</div>)}</div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowVerifyModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleVerify} disabled={!budgetInfo?.sufficient} className="px-4 py-2 bg-accent text-white rounded-lg">Verifikasi & Buat Jurnal</button></div></div></div>)}
+      {showVerifyModal && selectedRequest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8">
+            <h2 className="font-display text-xl font-bold mb-4">Verifikasi Payment Request #{selectedRequest.id}</h2>
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p><strong>Deskripsi:</strong> {selectedRequest.description}</p>
+                <p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p>
+                <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url || '#'} target="_blank" className="text-blue-600">Lihat file</a></p>
+              </div>
+              <div>
+                <label className="block font-medium">Pilih Proyek</label>
+                <select value={verifyData.projectId} onChange={e => handleProjectChange(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg">
+                  <option value={0}>-- Pilih Proyek --</option>
+                  {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})</option>))}
+                </select>
+                <button onClick={() => { setVerifyData({...verifyData, projectId: 0, newProjectCode: '', newProjectName: '', newProjectBudget: 0}); }} className="text-sm text-accent mt-1">+ Buat proyek baru</button>
+              </div>
+              {verifyData.projectId === 0 && (
+                <div className="border p-4 rounded-lg space-y-2">
+                  <input type="text" placeholder="Kode Proyek (contoh: INT, BNPB)" value={verifyData.newProjectCode} onChange={e => setVerifyData({...verifyData, newProjectCode: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" />
+                  <input type="text" placeholder="Nama Proyek" value={verifyData.newProjectName} onChange={e => setVerifyData({...verifyData, newProjectName: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+                  <input type="number" placeholder="Anggaran" value={verifyData.newProjectBudget || ''} onChange={e => setVerifyData({...verifyData, newProjectBudget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" />
+                  <button onClick={handleCreateNewProject} className="w-full bg-accent text-white py-2 rounded-lg">Simpan Proyek Baru</button>
+                </div>
+              )}
+              <div>
+                <label className="block font-medium">Akun Debit (Beban/Aset)</label>
+                <select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
+                  <option value={0}>-- Pilih Akun --</option>
+                  {coaList.filter(c => c.type === 'expense' || c.type === 'asset').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-medium">Akun Kredit (Hutang)</label>
+                <select value={verifyData.creditAccountId} onChange={e => setVerifyData({...verifyData, creditAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
+                  <option value={0}>-- Pilih Akun --</option>
+                  {coaList.filter(c => c.type === 'liability').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
+                </select>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div><label>PPN (Rp)</label><input type="number" value={verifyData.ppn} onChange={e => setVerifyData({...verifyData, ppn: parseInt(e.target.value) || 0, total: selectedRequest.amount + (parseInt(e.target.value) || 0) - verifyData.pph})} className="w-full px-4 py-2 border rounded-lg" /></div>
+                <div><label>PPh 23 (Rp)</label><input type="number" value={verifyData.pph} onChange={e => setVerifyData({...verifyData, pph: parseInt(e.target.value) || 0, total: selectedRequest.amount + verifyData.ppn - (parseInt(e.target.value) || 0)})} className="w-full px-4 py-2 border rounded-lg" /></div>
+                <div><label>Total</label><input type="text" value={formatCurrency(verifyData.total)} readOnly className="w-full px-4 py-2 border rounded-lg bg-gray-100" /></div>
+              </div>
+              {budgetInfo && (<div className={`p-3 rounded-lg ${budgetInfo.sufficient ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{budgetInfo.message}</div>)}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowVerifyModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleVerify} disabled={!budgetInfo?.sufficient} className="px-4 py-2 bg-accent text-white rounded-lg">Verifikasi & Buat Jurnal</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Detail */}
-      {showDetailModal && selectedRequest && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-lg"><div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Request</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div><div className="space-y-2 mt-4"><p><strong>No:</strong> {selectedRequest.request_number}</p><p><strong>Tanggal:</strong> {selectedRequest.request_date}</p><p><strong>Deskripsi:</strong> {selectedRequest.description}</p><p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p><p><strong>Status:</strong> {selectedRequest.status}</p>{selectedRequest.voucher_no && <p><strong>Voucher:</strong> {selectedRequest.voucher_no}</p>}{selectedRequest.attachment_url && <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>}</div></div></div>)}
+      {showDetailModal && selectedRequest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
+            <div className="flex justify-between">
+              <h2 className="font-display text-xl font-bold">Detail Request</h2>
+              <button onClick={() => setShowDetailModal(false)} className="text-gray-500">✕</button>
+            </div>
+            <div className="space-y-2 mt-4">
+              <p><strong>No:</strong> {selectedRequest.request_number}</p>
+              <p><strong>Tanggal:</strong> {selectedRequest.request_date}</p>
+              <p><strong>Deskripsi:</strong> {selectedRequest.description}</p>
+              <p><strong>Jumlah:</strong> {formatCurrency(selectedRequest.amount)}</p>
+              {selectedRequest.bank_name && <p><strong>Bank:</strong> {selectedRequest.bank_name} - {selectedRequest.bank_account_number} a.n. {selectedRequest.bank_account_name}</p>}
+              <p><strong>Status:</strong> {selectedRequest.status}</p>
+              {selectedRequest.voucher_no && <p><strong>Voucher:</strong> {selectedRequest.voucher_no}</p>}
+              {selectedRequest.attachment_url && <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

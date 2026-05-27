@@ -5,6 +5,8 @@ import { useState } from 'react';
 const navigation = [
   { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
   { name: 'Transaksi', to: '/transactions', icon: Receipt },
+  { name: 'Payment Requests', to: '/payment-requests', icon: CreditCard },
+  { name: 'Proyek', to: '/projects', icon: FolderKanban },
   { name: 'Dokumen', to: '/documents', icon: FolderOpen },
   { name: 'Kontak', to: '/contacts', icon: Users },
   { name: 'Laporan', to: '/reports', icon: FileText },

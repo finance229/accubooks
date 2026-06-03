@@ -185,7 +185,9 @@ export default function Invoices() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
+                <tr>
+                  <td colSpan={6} className="text-center py-8">Loading...</td>
+                </tr>
               ) : (
                 filteredInvoices.map((invoice, index) => (
                   <motion.tr 

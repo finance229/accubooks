@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type JournalLine = {
   id?: number;
@@ -24,6 +26,8 @@ type Journal = {
 };
 
 export default function JournalEntries() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [journals, setJournals] = useState<Journal[]>([]);
   const [coaList, setCoaList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,16 +43,20 @@ export default function JournalEntries() {
   });
 
   useEffect(() => {
-    fetchJournals();
-    fetchCoa();
-  }, []);
+    if (currentCompany?.id) {
+      fetchJournals();
+      fetchCoa();
+    }
+  }, [currentCompany]);
 
   const fetchJournals = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data: journalsData } = await supabase
       .from('journals')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('journal_date', { ascending: false });
     
     if (journalsData) {
@@ -67,16 +75,19 @@ export default function JournalEntries() {
   };
 
   const fetchCoa = async () => {
+    if (!currentCompany?.id) return;
+    
     const { data } = await supabase
       .from('coa')
       .select('id, code, suffix, name')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .eq('is_active', true);
     setCoaList(data || []);
   };
 
   const handleAddJournal = async () => {
     if (!newJournal.description || newJournal.lines.length === 0) return;
+    if (!currentCompany?.id) return;
 
     const year = new Date().getFullYear();
     const count = journals.length + 1;
@@ -93,7 +104,7 @@ export default function JournalEntries() {
     const { data: journalData, error: journalError } = await supabase
       .from('journals')
       .insert([{
-        company_id: 1,
+        company_id: currentCompany.id,
         journal_number: journalNumber,
         journal_date: newJournal.journal_date,
         description: newJournal.description,
@@ -137,7 +148,7 @@ export default function JournalEntries() {
   const handlePostJournal = async (journal: Journal) => {
     const { error } = await supabase
       .from('journals')
-      .update({ status: 'posted', posted_by: 'Admin', posted_at: new Date().toISOString() })
+      .update({ status: 'posted', posted_by: user?.name || 'Admin', posted_at: new Date().toISOString() })
       .eq('id', journal.id);
     if (!error) fetchJournals();
   };
@@ -195,6 +206,10 @@ export default function JournalEntries() {
 
   const stats = { total: journals.length, draft: journals.filter(j => j.status === 'draft').length, posted: journals.filter(j => j.status === 'posted').length };
 
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between animate-slide-in-up">
@@ -218,17 +233,8 @@ export default function JournalEntries() {
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-            <input type="text" placeholder="Cari nomor jurnal atau deskripsi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent" />
-          </div>
-          <div className="flex gap-2">
-            {['all', 'draft', 'posted'].map((status) => (
-              <button key={status} onClick={() => setFilterStatus(status)} className={`px-4 py-2.5 rounded-lg font-medium transition-colors capitalize ${filterStatus === status ? 'bg-accent text-white shadow-lg shadow-accent/30' : 'border border-border hover:bg-background'}`}>
-                {status === 'all' ? 'Semua' : status}
-              </button>
-            ))}
-          </div>
+          <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari nomor jurnal atau deskripsi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
+          <div className="flex gap-2">{['all', 'draft', 'posted'].map((status) => (<button key={status} onClick={() => setFilterStatus(status)} className={`px-4 py-2.5 rounded-lg font-medium transition-colors capitalize ${filterStatus === status ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>{status === 'all' ? 'Semua' : status}</button>))}</div>
         </div>
       </motion.div>
 

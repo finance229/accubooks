@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, DollarSign, Receipt, Users, FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -26,9 +27,9 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,12 +152,7 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-surface rounded-xl border border-border p-6"
-          >
+          <div className="bg-surface rounded-xl border border-border p-6">
             <h2 className="font-display text-xl font-bold text-text mb-4">Aksi Cepat</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {quickActions.map((action) => (
@@ -172,14 +168,9 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="bg-surface rounded-xl border border-border overflow-hidden"
-          >
+          <div className="bg-surface rounded-xl border border-border overflow-hidden">
             <div className="p-6 border-b border-border">
               <h2 className="font-display text-xl font-bold text-text">Transaksi Terbaru</h2>
             </div>
@@ -228,7 +219,7 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-          </motion.div>
+          </div>
         </>
       )}
     </div>

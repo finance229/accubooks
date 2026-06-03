@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, ChevronRight, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type Account = {
   id: number;
@@ -25,6 +27,8 @@ const accountTypes = [
 ];
 
 export default function ChartOfAccounts() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,15 +45,19 @@ export default function ChartOfAccounts() {
   });
 
   useEffect(() => {
-    fetchAccounts();
-  }, []);
+    if (currentCompany?.id) {
+      fetchAccounts();
+    }
+  }, [currentCompany]);
 
   const fetchAccounts = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('coa')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('code', { ascending: true });
     
     if (data) {
@@ -77,11 +85,12 @@ export default function ChartOfAccounts() {
 
   const handleAddAccount = async () => {
     if (!newAccount.code || !newAccount.name) return;
+    if (!currentCompany?.id) return;
 
     const { data, error } = await supabase
       .from('coa')
       .insert([{
-        company_id: 1,
+        company_id: currentCompany.id,
         code: newAccount.code,
         suffix: newAccount.suffix || '',
         name: newAccount.name,
@@ -204,6 +213,12 @@ export default function ChartOfAccounts() {
     total: accounts.reduce((count, acc) => count + 1 + (acc.children?.length || 0), 0),
   };
 
+  const React = require('react');
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between animate-slide-in-up">
@@ -234,7 +249,7 @@ export default function ChartOfAccounts() {
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-            <input type="text" placeholder="Cari kode atau nama akun..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent" />
+            <input type="text" placeholder="Cari kode atau nama akun..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" />
           </div>
           <div className="flex gap-2 flex-wrap">
             {accountTypes.map((type) => (
@@ -251,23 +266,23 @@ export default function ChartOfAccounts() {
           <table className="w-full">
             <thead className="bg-background">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Kode</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Suffix</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Nama Akun</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Tipe</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Kategori</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase tracking-wider">Aksi</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Kode</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Suffix</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Nama Akun</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tipe</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Kategori</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-8">Loading...</td></tr>
+                <tr><td colSpan={7} className="text-center py-8">Loading...<\/td></tr>
               ) : (
                 filteredAccounts.map(account => renderAccountRow(account))
               )}
             </tbody>
-           </table>
+          </table>
         </div>
       </motion.div>
 

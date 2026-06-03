@@ -1,6 +1,8 @@
-import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingUp, FolderOpen, CreditCard, FolderKanban } from 'lucide-react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingUp, FolderOpen, CreditCard, FolderKanban, LogOut } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { useCompany } from '../contexts/CompanyContext';
 
 const navigation = [
   { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
@@ -15,6 +17,14 @@ const navigation = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user, signOut } = useAuth();
+  const { currentCompany } = useCompany();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -52,20 +62,35 @@ export default function Layout() {
               </NavLink>
             ))}
           </nav>
+          
+          {/* USER INFO & LOGOUT - BAGIAN INI YANG DIUBAH */}
           <div className="p-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-hover">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-                <span className="text-accent font-semibold text-sm">PT</span>
+                <span className="text-accent font-semibold text-sm">
+                  {user?.name?.substring(0, 2).toUpperCase() || user?.email?.substring(0, 2).toUpperCase() || 'U'}
+                </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">PT Maju Jaya</p>
-                <p className="text-xs text-white/50 truncate">Admin</p>
+                <p className="text-sm font-medium text-white truncate">{user?.name || user?.email}</p>
+                <p className="text-xs text-white/50 truncate">
+                  {currentCompany?.name || 'Pilih Perusahaan'} • {user?.role || 'staff'}
+                </p>
               </div>
+              <button 
+                onClick={handleLogout}
+                className="p-1.5 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
       </aside>
+      
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      
       <div className="lg:pl-64">
         <header className="sticky top-0 z-30 h-16 bg-surface border-b border-border flex items-center justify-between px-6">
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-text-muted hover:text-text">
@@ -74,8 +99,8 @@ export default function Layout() {
           <div className="flex-1" />
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-text">Periode Akuntansi</p>
-              <p className="text-xs text-text-muted">Januari 2024</p>
+              <p className="text-sm font-medium text-text">{currentCompany?.name || 'AccuBooks'}</p>
+              <p className="text-xs text-text-muted">{user?.role || 'User'} • {new Date().getFullYear()}</p>
             </div>
           </div>
         </header>

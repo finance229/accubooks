@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Filter, Download, ArrowUpDown, Loader2, Eye } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -87,12 +87,7 @@ export default function Transactions() {
         </button>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="bg-surface rounded-xl border border-border p-6"
-      >
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
@@ -122,19 +117,14 @@ export default function Transactions() {
             <span className="hidden md:inline">Export</span>
           </button>
         </div>
-      </motion.div>
+      </div>
 
       {loading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="w-8 h-8 animate-spin text-accent" />
         </div>
       ) : (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-surface rounded-xl border border-border overflow-hidden"
-        >
+        <div className="bg-surface rounded-xl border border-border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-background">
@@ -205,7 +195,7 @@ export default function Transactions() {
               Menampilkan <span className="font-medium text-text">{filteredTransactions.length}</span> dari <span className="font-medium text-text">{transactions.length}</span> transaksi
             </p>
           </div>
-        </motion.div>
+        </div>
       )}
     </div>
   );

@@ -2,8 +2,12 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Mail, Phone, Building2, UserCircle, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Contacts() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,15 +22,19 @@ export default function Contacts() {
   });
 
   useEffect(() => {
-    fetchContacts();
-  }, []);
+    if (currentCompany?.id) {
+      fetchContacts();
+    }
+  }, [currentCompany]);
 
   const fetchContacts = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('contacts')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('created_at', { ascending: false });
     
     setContacts(data || []);
@@ -35,11 +43,12 @@ export default function Contacts() {
 
   const handleAddContact = async () => {
     if (!newContact.name) return;
+    if (!currentCompany?.id) return;
 
     const { data, error } = await supabase
       .from('contacts')
       .insert([{
-        company_id: 1,
+        company_id: currentCompany.id,
         name: newContact.name,
         type: newContact.type,
         email: newContact.email || null,
@@ -79,6 +88,10 @@ export default function Contacts() {
     vendors: contacts.filter(c => c.type === 'vendor').length,
     totalReceivables: contacts.filter(c => c.balance > 0).reduce((sum, c) => sum + c.balance, 0),
   };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">

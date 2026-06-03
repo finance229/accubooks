@@ -321,7 +321,7 @@ export default function Invoices() {
             <tbody className="divide-y divide-border">
   {loading ? (
     <tr>
-      <td colSpan={6} className="text-center py-8">Loading...<\/td>
+      <td colSpan={6} className="text-center py-8">Loading...</td>
     </tr>
   ) : (
     filteredInvoices.map((invoice) => (

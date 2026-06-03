@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { FileText, Upload, Search, Filter, Trash2, Eye, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
+import { uploadToGoogleDrive } from '../lib/googleDrive';
 
 type Document = {
   id: string;
@@ -13,6 +16,8 @@ type Document = {
 };
 
 export default function Documents() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -23,15 +28,19 @@ export default function Documents() {
   const [selectedType, setSelectedType] = useState<'invoice' | 'receipt' | 'contract' | 'other'>('invoice');
 
   useEffect(() => {
-    fetchDocuments();
-  }, []);
+    if (currentCompany?.id) {
+      fetchDocuments();
+    }
+  }, [currentCompany]);
 
   const fetchDocuments = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('documents')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('created_at', { ascending: false });
     
     setDocuments(data || []);
@@ -60,6 +69,7 @@ export default function Documents() {
 
   const handleUpload = async () => {
     if (!selectedFile) return;
+    if (!currentCompany?.id) return;
 
     setUploading(true);
     
@@ -87,7 +97,7 @@ export default function Documents() {
         const { data, error } = await supabase
           .from('documents')
           .insert([{
-            company_id: 1,
+            company_id: currentCompany.id,
             name: selectedFile.name,
             type: selectedType,
             file_id: result.fileId,
@@ -153,6 +163,10 @@ export default function Documents() {
       year: 'numeric',
     });
   };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">

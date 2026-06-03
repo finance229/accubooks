@@ -31,13 +31,25 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // Ambil daftar perusahaan yang boleh diakses user
+      console.log('Fetching companies for user:', user.id);
+      
       const { data, error } = await supabase
         .from('user_companies')
-        .select('company_id, companies(id, name)')
+        .select(`
+          company_id,
+          companies!inner (
+            id,
+            name
+          )
+        `)
         .eq('user_id', user.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+
+      console.log('Data from Supabase:', data);
 
       const companyList = (data || []).map(item => ({
         id: item.company_id,
@@ -46,7 +58,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
       setCompanies(companyList);
 
-      // Set perusahaan default (yang pertama)
       if (companyList.length > 0 && !currentCompany) {
         setCurrentCompany(companyList[0]);
       }

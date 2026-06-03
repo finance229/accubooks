@@ -78,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       return { success: true };
-    } catch (error) any {
+    } catch (error: any) {
       return { success: false, error: error.message };
     }
   };

@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Receipt, Users, FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const quickActions = [
-  { name: 'Faktur Penjualan', icon: FileText, color: 'bg-blue-500' },
-  { name: 'Faktur Pembelian', icon: Receipt, color: 'bg-purple-500' },
-  { name: 'Kas & Bank', icon: DollarSign, color: 'bg-green-500' },
-  { name: 'Kontak Baru', icon: Users, color: 'bg-orange-500' },
+  { name: 'Faktur Penjualan', icon: FileText, color: 'bg-blue-500', path: '/invoices' },
+  { name: 'Faktur Pembelian', icon: Receipt, color: 'bg-purple-500', path: '/transactions' },
+  { name: 'Kas & Bank', icon: DollarSign, color: 'bg-green-500', path: '/transactions' },
+  { name: 'Kontak Baru', icon: Users, color: 'bg-orange-500', path: '/contacts' },
 ];
 
 const typeLabels: Record<string, string> = {
@@ -24,28 +26,35 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (currentCompany?.id) {
+      fetchData();
+    }
+  }, [currentCompany]);
 
   const fetchData = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     
     const { data: transactionsData } = await supabase
       .from('transactions')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('transaction_date', { ascending: false });
     
     const { data: contactsData } = await supabase
       .from('contacts')
       .select('*')
-      .eq('company_id', 1);
+      .eq('company_id', currentCompany.id);
     
     setTransactions(transactionsData || []);
     setContacts(contactsData || []);
@@ -92,11 +101,19 @@ export default function Dashboard() {
 
   const recentTransactions = transactions.slice(0, 5);
 
+  const handleActionClick = (path: string) => {
+    navigate(path);
+  };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="animate-slide-in-up">
         <h1 className="font-display text-3xl font-bold text-text">Dashboard</h1>
-        <p className="text-text-muted mt-1">Selamat datang kembali! Berikut ringkasan bisnis Anda.</p>
+        <p className="text-text-muted mt-1">Selamat datang, {user?.name || user?.email}!</p>
       </div>
 
       {loading ? (
@@ -145,6 +162,7 @@ export default function Dashboard() {
               {quickActions.map((action) => (
                 <button
                   key={action.name}
+                  onClick={() => handleActionClick(action.path)}
                   className="flex flex-col items-center gap-3 p-4 rounded-lg border-2 border-border hover:border-accent hover:bg-accent/5 transition-all duration-200 group"
                 >
                   <div className={`${action.color} w-12 h-12 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform`}>
@@ -189,7 +207,7 @@ export default function Dashboard() {
                         }`}>
                           {typeLabels[transaction.type] || transaction.type}
                         </span>
-                      </td>
+                       </td>
                       <td className="px-6 py-4 text-sm text-text">{transaction.category}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-semibold">
                         <span className={transaction.amount > 0 ? 'text-success' : 'text-danger'}>

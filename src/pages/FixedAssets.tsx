@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Calculator, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type FixedAsset = {
   id: number;
@@ -18,6 +20,8 @@ type FixedAsset = {
 };
 
 export default function FixedAssets() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,15 +39,19 @@ export default function FixedAssets() {
   });
 
   useEffect(() => {
-    fetchAssets();
-  }, []);
+    if (currentCompany?.id) {
+      fetchAssets();
+    }
+  }, [currentCompany]);
 
   const fetchAssets = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('fixed_assets')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('created_at', { ascending: false });
     
     setAssets(data || []);
@@ -52,13 +60,14 @@ export default function FixedAssets() {
 
   const handleAddAsset = async () => {
     if (!newAsset.code || !newAsset.name) return;
+    if (!currentCompany?.id) return;
 
     const bookValue = newAsset.acquisition_cost;
 
     const { data, error } = await supabase
       .from('fixed_assets')
       .insert([{
-        company_id: 1,
+        company_id: currentCompany.id,
         code: newAsset.code,
         name: newAsset.name,
         category: newAsset.category,
@@ -129,6 +138,10 @@ export default function FixedAssets() {
     totalBookValue: assets.reduce((sum, a) => sum + a.book_value, 0),
   };
 
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between animate-slide-in-up">
@@ -180,7 +193,7 @@ export default function FixedAssets() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-8">Loading...</td></tr>
+                <tr><td colSpan={8} className="text-center py-8">Loading...<\/td></tr>
               ) : (
                 filteredAssets.map((asset, index) => (
                   <motion.tr key={asset.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 }} className="hover:bg-background">

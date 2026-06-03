@@ -8,6 +8,7 @@ import CompanyDropdown from './CompanyDropdown';
 const navigation = [
   { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
   { name: 'Transaksi', to: '/transactions', icon: Receipt },
+  { name: 'Invoice', to: '/invoices', icon: FileText },
   { name: 'Payment Requests', to: '/payment-requests', icon: CreditCard },
   { name: 'Proyek', to: '/projects', icon: FolderKanban },
   { name: 'Dokumen', to: '/documents', icon: FolderOpen },
@@ -15,7 +16,6 @@ const navigation = [
   { name: 'Laporan', to: '/reports', icon: FileText },
   { name: 'Pengaturan', to: '/settings', icon: Settings },
 ];
-
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useAuth();

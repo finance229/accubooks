@@ -3,6 +3,7 @@ import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingU
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
+import CompanyDropdown from './CompanyDropdown';
 
 const navigation = [
   { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
@@ -28,6 +29,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-sidebar transform transition-transform duration-300 lg:translate-x-0 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
@@ -43,6 +45,7 @@ export default function Layout() {
               <X className="w-6 h-6" />
             </button>
           </div>
+          
           <nav className="flex-1 px-4 py-6 space-y-1">
             {navigation.map((item) => (
               <NavLink
@@ -63,6 +66,7 @@ export default function Layout() {
             ))}
           </nav>
           
+          {/* USER INFO & LOGOUT */}
           <div className="p-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-hover">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
@@ -88,21 +92,31 @@ export default function Layout() {
         </div>
       </aside>
       
+      {/* OVERLAY UNTUK MOBILE */}
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
       
+      {/* MAIN CONTENT */}
       <div className="lg:pl-64">
+        {/* HEADER */}
         <header className="sticky top-0 z-30 h-16 bg-surface border-b border-border flex items-center justify-between px-6">
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-text-muted hover:text-text">
             <Menu className="w-6 h-6" />
           </button>
+          
           <div className="flex-1" />
+          
           <div className="flex items-center gap-4">
+            {/* DROPDOWN PERUSAHAAN - UNTUK SUPER ADMIN & DIREKTUR */}
+            <CompanyDropdown />
+            
             <div className="text-right">
               <p className="text-sm font-medium text-text">{currentCompany?.name || 'AccuBooks'}</p>
               <p className="text-xs text-text-muted">{user?.role || 'User'} • {new Date().getFullYear()}</p>
             </div>
           </div>
         </header>
+        
+        {/* PAGE CONTENT */}
         <main className="p-6">
           <Outlet />
         </main>

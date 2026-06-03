@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, ChevronRight, ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -135,12 +135,8 @@ export default function ChartOfAccounts() {
     const isHeader = account.category === 'header';
     
     return (
-      <React.Fragment key={account.id}>
-        <motion.tr
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className={`hover:bg-background transition-colors ${isHeader ? 'bg-background/50 font-semibold' : ''}`}
-        >
+      <Fragment key={account.id}>
+        <tr className={`hover:bg-background transition-colors ${isHeader ? 'bg-background/50 font-semibold' : ''}`}>
           <td className="px-6 py-3 whitespace-nowrap">
             <div className="flex items-center gap-2" style={{ paddingLeft: `${level * 24}px` }}>
               {hasChildren && (
@@ -188,9 +184,9 @@ export default function ChartOfAccounts() {
               </button>
             </div>
            </td>
-        </motion.tr>
+        </tr>
         {hasChildren && isExpanded && account.children?.map(child => renderAccountRow(child, level + 1))}
-      </React.Fragment>
+      </Fragment>
     );
   };
 
@@ -213,8 +209,6 @@ export default function ChartOfAccounts() {
     total: accounts.reduce((count, acc) => count + 1 + (acc.children?.length || 0), 0),
   };
 
-  const React = require('react');
-
   if (!currentCompany) {
     return <div className="flex justify-center py-12">Loading...</div>;
   }
@@ -233,19 +227,19 @@ export default function ChartOfAccounts() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-surface rounded-xl border border-border p-4">
+        <div className="bg-surface rounded-xl border border-border p-4">
           <p className="text-text-muted text-xs font-medium">Total Akun</p>
           <p className="text-text text-2xl font-bold font-display mt-1">{stats.total}</p>
-        </motion.div>
+        </div>
         {accountTypes.filter(t => t.value !== 'all').map((type, idx) => (
-          <motion.div key={type.value} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: (idx + 1) * 0.05 }} className="bg-surface rounded-xl border border-border p-4">
+          <div key={type.value} className="bg-surface rounded-xl border border-border p-4">
             <p className="text-text-muted text-xs font-medium capitalize">{type.label}</p>
             <p className="text-text text-2xl font-bold font-display mt-1">0</p>
-          </motion.div>
+          </div>
         ))}
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-surface rounded-xl border border-border p-6">
+      <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
@@ -259,9 +253,9 @@ export default function ChartOfAccounts() {
             ))}
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-surface rounded-xl border border-border overflow-hidden">
+      <div className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-background">
@@ -277,14 +271,16 @@ export default function ChartOfAccounts() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-8">Loading...<\/td></tr>
+                <tr>
+                  <td colSpan={7} className="text-center py-8">Loading...</td>
+                </tr>
               ) : (
                 filteredAccounts.map(account => renderAccountRow(account))
               )}
             </tbody>
           </table>
         </div>
-      </motion.div>
+      </div>
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

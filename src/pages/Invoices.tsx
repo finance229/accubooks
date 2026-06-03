@@ -1,6 +1,3 @@
-pertinya kode yang Anda kirim sudah benar. Namun, saya akan menyediakan ulang file `Invoices.tsx` yang sudah diperbaiki lengkap:
-
-```tsx
 import { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -324,7 +321,7 @@ export default function Invoices() {
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-8">Loading...</td>
+                  <td colSpan={6} className="text-center py-8">Loading...<\/td>
                 </tr>
               ) : (
                 filteredInvoices.map((invoice) => (
@@ -337,4 +334,163 @@ export default function Invoices() {
                       <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
                         {getStatusLabel(invoice.status)}
                       </span>
-                    </td
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold text-text">Buat Invoice Baru</h2>
+              <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="relative">
+                <label className="block text-sm font-medium text-text mb-1">Customer *</label>
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-text-muted" />
+                  <input 
+                    type="text" 
+                    placeholder="Cari customer..." 
+                    value={customerSearch} 
+                    onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }} 
+                    className="flex-1 px-4 py-2 border border-border rounded-lg" 
+                  />
+                </div>
+                {showCustomerDropdown && filteredCustomers.length > 0 && (
+                  <div className="absolute z-10 w-full bg-surface border border-border rounded-lg mt-1 max-h-48 overflow-auto">
+                    {filteredCustomers.map(c => (
+                      <button 
+                        key={c.id} 
+                        className="w-full text-left px-4 py-2 hover:bg-background" 
+                        onClick={() => { 
+                          setFormData({ ...formData, customer_id: c.id, customer_name: c.name }); 
+                          setCustomerSearch(c.name); 
+                          setShowCustomerDropdown(false); 
+                        }}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Tanggal Invoice</label>
+                  <input type="date" value={formData.invoice_date} onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Jatuh Tempo</label>
+                  <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text mb-1">Proyek (Opsional)</label>
+                <select value={formData.project_id || ''} onChange={(e) => setFormData({ ...formData, project_id: e.target.value ? parseInt(e.target.value) : null })} className="w-full px-4 py-2 border border-border rounded-lg">
+                  <option value="">-- Pilih Proyek --</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text mb-1">Item</label>
+                <button onClick={addItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-background">
+                      <tr>
+                        <th className="px-2 py-2 text-left text-xs text-text-muted">Deskripsi</th>
+                        <th className="px-2 py-2 text-center text-xs text-text-muted w-20">Qty</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Harga</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Diskon</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Jumlah</th>
+                        <th className="w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formData.items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="px-2 py-2">
+                            <input type="text" placeholder="Deskripsi" value={item.description} onChange={(e) => updateItem(idx, 'description', e.target.value)} className="w-full px-2 py-1 border border-border rounded text-sm" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.unit_price} onChange={(e) => updateItem(idx, 'unit_price', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.discount} onChange={(e) => updateItem(idx, 'discount', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2 text-right text-sm font-mono">
+                            {formatCurrency(item.amount)}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <button onClick={() => removeItem(idx)}>
+                              <Trash2 className="w-4 h-4 text-danger" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-background">
+                      <tr>
+                        <td colSpan={4} className="px-2 py-2 text-right font-medium">Subtotal</td>
+                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(subtotal)}</td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="px-2 py-2 text-right font-medium">PPN {currentCompany?.id === 1 ? '11%' : '1.1%'}</td>
+                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(ppn)}</td>
+                        <td></td>
+                      </tr>
+                      <tr className="font-bold">
+                        <td colSpan={4} className="px-2 py-2 text-right">TOTAL</td>
+                        <td className="px-2 py-2 text-right text-accent">{formatCurrency(total)}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text mb-1">Catatan</label>
+                <textarea rows={2} value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => { setShowModal(false); resetForm(); }} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Invoice</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -63,7 +63,6 @@ export default function Layout() {
             ))}
           </nav>
           
-          {/* USER INFO & LOGOUT - BAGIAN INI YANG DIUBAH */}
           <div className="p-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-hover">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">

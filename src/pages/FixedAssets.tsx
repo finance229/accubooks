@@ -156,17 +156,22 @@ export default function FixedAssets() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Aset', value: stats.total, icon: '🏗️' },
-          { label: 'Harga Perolehan', value: formatCurrency(stats.totalCost), icon: '💰' },
-          { label: 'Akum. Penyusutan', value: formatCurrency(stats.totalDepreciation), icon: '📉' },
-          { label: 'Nilai Buku', value: formatCurrency(stats.totalBookValue), icon: '📊' },
-        ].map((stat, idx) => (
-          <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="bg-surface rounded-xl border border-border p-4">
-            <p className="text-text-muted text-xs font-medium">{stat.label}</p>
-            <p className="text-text text-lg font-bold font-display mt-1">{stat.value}</p>
-          </motion.div>
-        ))}
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Total Aset</p>
+          <p className="text-text text-2xl font-bold font-display mt-1">{stats.total}</p>
+        </div>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Harga Perolehan</p>
+          <p className="text-text text-lg font-bold font-display mt-1">{formatCurrency(stats.totalCost)}</p>
+        </div>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Akum. Penyusutan</p>
+          <p className="text-text text-lg font-bold font-display mt-1">{formatCurrency(stats.totalDepreciation)}</p>
+        </div>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Nilai Buku</p>
+          <p className="text-text text-lg font-bold font-display mt-1">{formatCurrency(stats.totalBookValue)}</p>
+        </div>
       </div>
 
       <div className="bg-surface rounded-xl border border-border p-6">
@@ -193,7 +198,9 @@ export default function FixedAssets() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-8">Loading...<\/td></tr>
+                <tr>
+                  <td colSpan={8} className="text-center py-8">Loading...</td>
+                </tr>
               ) : (
                 filteredAssets.map((asset, index) => (
                   <motion.tr key={asset.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 }} className="hover:bg-background">

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Search, Calendar, Download, Printer, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type LedgerEntry = {
   date: string;
@@ -21,6 +23,8 @@ type Account = {
 };
 
 export default function Ledger() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [ledgerData, setLedgerData] = useState<LedgerEntry[]>([]);
@@ -33,20 +37,24 @@ export default function Ledger() {
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
-    fetchAccounts();
-  }, []);
+    if (currentCompany?.id) {
+      fetchAccounts();
+    }
+  }, [currentCompany]);
 
   useEffect(() => {
-    if (selectedAccount) {
+    if (selectedAccount && currentCompany?.id) {
       fetchLedgerData();
     }
-  }, [selectedAccount, startDate, endDate]);
+  }, [selectedAccount, startDate, endDate, currentCompany]);
 
   const fetchAccounts = async () => {
+    if (!currentCompany?.id) return;
+    
     const { data } = await supabase
       .from('coa')
       .select('id, code, suffix, name, type')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .eq('is_active', true)
       .order('code', { ascending: true });
     
@@ -58,7 +66,7 @@ export default function Ledger() {
   };
 
   const fetchLedgerData = async () => {
-    if (!selectedAccount) return;
+    if (!selectedAccount || !currentCompany?.id) return;
     
     setLoading(true);
     
@@ -154,6 +162,7 @@ export default function Ledger() {
   const endingBalance = ledgerData[ledgerData.length - 1]?.balance || 0;
 
   const handlePrint = () => window.print();
+  
   const handleExport = () => {
     const csvContent = [['Tanggal', 'Deskripsi', 'Ref', 'Debit', 'Kredit', 'Saldo'], ...ledgerData.map(item => [item.date, item.description, item.ref, item.debit, item.credit, item.balance])].map(row => row.join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -169,6 +178,10 @@ export default function Ledger() {
     const colors: Record<string, string> = { asset: 'text-blue-600', liability: 'text-red-600', equity: 'text-purple-600', revenue: 'text-green-600', expense: 'text-orange-600' };
     return colors[type] || 'text-gray-600';
   };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -187,11 +200,11 @@ export default function Ledger() {
           </div>
           <div>
             <label className="block text-sm font-medium text-text mb-2">Dari Tanggal</label>
-            <div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent" /></div>
+            <div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
           </div>
           <div>
             <label className="block text-sm font-medium text-text mb-2">Sampai Tanggal</label>
-            <div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent" /></div>
+            <div className="relative"><Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
           </div>
         </div>
       </motion.div>

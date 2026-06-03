@@ -319,35 +319,36 @@ export default function Invoices() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {loading ? (
-                <tr>
-<td colSpan={6} className="text-center py-8">Loading...</td>                </tr>
-              ) : (
-                filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-background transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</tr>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
-                    <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
-                        {getStatusLabel(invoice.status)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
-                          <Send className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
+  {loading ? (
+    <tr>
+      <td colSpan={6} className="text-center py-8">Loading...<\/td>
+    </tr>
+  ) : (
+    filteredInvoices.map((invoice) => (
+      <tr key={invoice.id} className="hover:bg-background transition-colors">
+        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
+        <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
+        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
+        <td className="px-6 py-4 whitespace-nowrap text-center">
+          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
+            {getStatusLabel(invoice.status)}
+          </span>
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-right">
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+              <Eye className="w-4 h-4" />
+            </button>
+            <button className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    ))
+  )}
+</tbody>
           </table>
         </div>
       </div>

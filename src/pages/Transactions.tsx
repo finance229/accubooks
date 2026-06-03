@@ -3,6 +3,8 @@ import { Plus, Search, Filter, Download, ArrowUpDown, Loader2, Eye } from 'lucid
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const typeLabels = {
   sale: 'Penjualan',
@@ -19,21 +21,27 @@ const statusLabels = {
 
 export default function Transactions() {
   const navigate = useNavigate();
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('Semua');
 
   useEffect(() => {
-    fetchTransactions();
-  }, []);
+    if (currentCompany?.id) {
+      fetchTransactions();
+    }
+  }, [currentCompany]);
 
   const fetchTransactions = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('transactions')
       .select('*')
-      .eq('company_id', 1)
+      .eq('company_id', currentCompany.id)
       .order('transaction_date', { ascending: false });
     
     setTransactions(data || []);
@@ -61,6 +69,10 @@ export default function Transactions() {
   const handleRowClick = (id: string) => {
     navigate(`/transactions/${id}`);
   };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">

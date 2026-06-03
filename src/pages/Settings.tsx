@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Building2, User, Bell, Shield, Palette, Globe, Save, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type Company = {
   id: number;
@@ -12,6 +14,8 @@ type Company = {
 };
 
 export default function Settings() {
+  const { currentCompany } = useCompany();
+  const { user } = useAuth();
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -25,15 +29,19 @@ export default function Settings() {
   });
 
   useEffect(() => {
-    fetchCompany();
-  }, []);
+    if (currentCompany?.id) {
+      fetchCompany();
+    }
+  }, [currentCompany]);
 
   const fetchCompany = async () => {
+    if (!currentCompany?.id) return;
+    
     setLoading(true);
     const { data } = await supabase
       .from('companies')
       .select('*')
-      .eq('id', 1)
+      .eq('id', currentCompany.id)
       .single();
     
     if (data) {
@@ -49,6 +57,8 @@ export default function Settings() {
   };
 
   const handleSaveCompany = async () => {
+    if (!currentCompany?.id) return;
+    
     setSaving(true);
     const { error } = await supabase
       .from('companies')
@@ -59,7 +69,7 @@ export default function Settings() {
         phone: formData.phone,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', 1);
+      .eq('id', currentCompany.id);
     
     if (!error) {
       setSaveSuccess(true);
@@ -118,6 +128,10 @@ export default function Settings() {
     if (activeTab === 'period') return renderPeriodTab();
     return renderSecurityTab();
   };
+
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
 
   return (
     <div className="space-y-6">

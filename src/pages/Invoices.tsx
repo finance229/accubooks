@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
+import { generateInvoiceHTML } from '../lib/invoiceTemplate';
 
 type Invoice = {
   id: number;
@@ -33,6 +34,9 @@ type Customer = {
   id: number;
   name: string;
   type: string;
+  email: string;
+  address: string;
+  phone: string;
 };
 
 type Project = {
@@ -91,7 +95,7 @@ export default function Invoices() {
     if (!currentCompany?.id) return;
     const { data } = await supabase
       .from('contacts')
-      .select('id, name, type')
+      .select('id, name, type, email, address, phone')
       .eq('company_id', currentCompany.id)
       .eq('type', 'customer');
     setCustomers(data || []);
@@ -218,6 +222,69 @@ export default function Invoices() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
   };
 
+  // ========== DOWNLOAD PDF ==========
+  const handleDownloadPDF = async (invoice: Invoice) => {
+    try {
+      // Ambil detail items
+      const { data: items } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoice.id);
+      
+      // Ambil data perusahaan
+      const { data: company } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', currentCompany?.id)
+        .single();
+      
+      // Ambil data customer
+      const { data: customer } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('id', invoice.customer_id)
+        .single();
+      
+      const html = generateInvoiceHTML(invoice, company, customer, items || []);
+      
+      // Buka di tab baru untuk print (bisa save as PDF)
+      const win = window.open();
+      win?.document.write(html);
+      win?.document.close();
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Gagal generate PDF');
+    }
+  };
+
+  // ========== KIRIM EMAIL ==========
+  const handleSendEmail = async (invoice: Invoice) => {
+    try {
+      // Ambil data customer
+      const { data: customer } = await supabase
+        .from('contacts')
+        .select('email')
+        .eq('id', invoice.customer_id)
+        .single();
+      
+      if (!customer?.email) {
+        alert('Customer belum memiliki alamat email');
+        return;
+      }
+      
+      // Buat link invoice (opsional, bisa diganti dengan link download PDF)
+      const link = `${window.location.origin}/invoices/${invoice.id}`;
+      
+      const subject = `Invoice ${invoice.invoice_number} dari ${currentCompany?.name}`;
+      const body = `Yth. ${invoice.customer_name},\n\nBerikut adalah invoice untuk transaksi Anda.\n\nLink invoice: ${link}\n\nTerima kasih atas kepercayaan Anda.\n\nSalam,\n${currentCompany?.name}`;
+      
+      window.location.href = `mailto:${customer.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Gagal membuka email client');
+    }
+  };
+
   const filteredInvoices = invoices.filter(inv => {
     const matchesSearch = inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          inv.customer_name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -320,9 +387,7 @@ export default function Invoices() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-8">Loading...</td>
-                </tr>
+                <tr><td colSpan={6} className="text-center py-8">Loading...<\/td></tr>
               ) : (
                 filteredInvoices.map((invoice) => (
                   <tr key={invoice.id} className="hover:bg-background transition-colors">
@@ -337,10 +402,13 @@ export default function Invoices() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
+                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Kirim ke Email">
                           <Send className="w-4 h-4" />
                         </button>
                       </div>
@@ -353,6 +421,7 @@ export default function Invoices() {
         </div>
       </div>
 
+      {/* Modal Buat Invoice */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
@@ -388,7 +457,7 @@ export default function Invoices() {
                           setShowCustomerDropdown(false); 
                         }}
                       >
-                        {c.name}
+                        {c.name} - {c.email}
                       </button>
                     ))}
                   </div>
@@ -487,6 +556,38 @@ export default function Invoices() {
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => { setShowModal(false); resetForm(); }} className="px-4 py-2 border border-border rounded-lg">Batal</button>
               <button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Invoice</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detail Invoice */}
+      {showDetailModal && selectedInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold text-text">Detail Invoice</h2>
+              <button onClick={() => setShowDetailModal(false)} className="text-gray-500">✕</button>
+            </div>
+            <div className="space-y-3">
+              <p><strong>No. Invoice:</strong> {selectedInvoice.invoice_number}</p>
+              <p><strong>Tanggal:</strong> {selectedInvoice.invoice_date}</p>
+              <p><strong>Jatuh Tempo:</strong> {selectedInvoice.due_date}</p>
+              <p><strong>Customer:</strong> {selectedInvoice.customer_name}</p>
+              <p><strong>Subtotal:</strong> {formatCurrency(selectedInvoice.subtotal)}</p>
+              <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn)}</p>
+              <p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p>
+              <p><strong>Status:</strong> 
+                <span className={`inline-flex ml-2 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(selectedInvoice.status)}`}>
+                  {getStatusLabel(selectedInvoice.status)}
+                </span>
+              </p>
+              {selectedInvoice.notes && <p><strong>Catatan:</strong> {selectedInvoice.notes}</p>}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">
+                <Download className="w-4 h-4 inline mr-2" /> Download PDF
+              </button>
             </div>
           </div>
         </div>

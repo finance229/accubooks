@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import CompanyDropdown from './CompanyDropdown';
+import { Truck, FileText as FileTextIcon } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
@@ -15,6 +16,8 @@ const navigation = [
   { name: 'Kontak', to: '/contacts', icon: Users },
   { name: 'Laporan', to: '/reports', icon: FileText },
   { name: 'Pengaturan', to: '/settings', icon: Settings },
+  { name: 'Vendor', to: '/vendors', icon: Truck },
+  { name: 'Account Payable', to: '/purchase-invoices', icon: FileTextIcon },
 ];
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

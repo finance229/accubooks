@@ -57,12 +57,19 @@ export default function Invoices() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState('transfer');
+  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
+  const [editForm, setEditForm] = useState({
+    invoice_date: '',
+    due_date: '',
+    notes: '',
+  });
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -229,6 +236,98 @@ export default function Invoices() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
   };
 
+  // ========== EDIT INVOICE ==========
+  const handleOpenEditModal = async (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setEditForm({
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      notes: invoice.notes || '',
+    });
+    
+    const { data: items } = await supabase
+      .from('invoice_items')
+      .select('*')
+      .eq('invoice_id', invoice.id);
+    
+    setEditItems(items || []);
+    setShowEditModal(true);
+  };
+
+  const handleEditItem = (index: number, field: keyof InvoiceItem, value: any) => {
+    const newItems = [...editItems];
+    newItems[index] = { ...newItems[index], [field]: value };
+    
+    if (field === 'quantity' || field === 'unit_price' || field === 'discount') {
+      const qty = newItems[index].quantity;
+      const price = newItems[index].unit_price;
+      const disc = newItems[index].discount;
+      newItems[index].amount = (qty * price) - disc;
+    }
+    
+    setEditItems(newItems);
+  };
+
+  const addEditItem = () => {
+    setEditItems([...editItems, { description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0 }]);
+  };
+
+  const removeEditItem = (index: number) => {
+    if (editItems.length > 1) {
+      setEditItems(editItems.filter((_, i) => i !== index));
+    }
+  };
+
+  const calculateEditTotals = () => {
+    const subtotal = editItems.reduce((sum, item) => sum + item.amount, 0);
+    const ppnRate = currentCompany?.id === 1 ? 0.11 : 0.011;
+    const ppn = Math.round(subtotal * ppnRate);
+    return { subtotal, ppn, total: subtotal + ppn };
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedInvoice) return;
+    
+    const { subtotal: newSubtotal, ppn: newPpn, total: newTotal } = calculateEditTotals();
+    
+    const { error: invoiceError } = await supabase
+      .from('invoices')
+      .update({
+        invoice_date: editForm.invoice_date,
+        due_date: editForm.due_date,
+        subtotal: newSubtotal,
+        ppn: newPpn,
+        total: newTotal,
+        notes: editForm.notes,
+      })
+      .eq('id', selectedInvoice.id);
+    
+    if (invoiceError) {
+      alert('Gagal update invoice');
+      return;
+    }
+    
+    // Hapus items lama
+    await supabase.from('invoice_items').delete().eq('invoice_id', selectedInvoice.id);
+    
+    // Insert items baru
+    for (const item of editItems) {
+      await supabase.from('invoice_items').insert([{
+        invoice_id: selectedInvoice.id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount: item.discount,
+        amount: item.amount,
+      }]);
+    }
+    
+    alert('Invoice berhasil diupdate');
+    setShowEditModal(false);
+    fetchInvoices();
+  };
+
+  // ========== DOWNLOAD PDF ==========
   const handleDownloadPDF = async (invoice: Invoice) => {
     try {
       const { data: items } = await supabase
@@ -259,6 +358,7 @@ export default function Invoices() {
     }
   };
 
+  // ========== KIRIM EMAIL ==========
   const handleSendEmail = async (invoice: Invoice) => {
     try {
       const { data: customer } = await supabase
@@ -283,10 +383,7 @@ export default function Invoices() {
     }
   };
 
-  const handleEditInvoice = (invoice: Invoice) => {
-    alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
-  };
-
+  // ========== VERIFIKASI INVOICE ==========
   const handleVerifyInvoice = async (invoice: Invoice) => {
     const { error } = await supabase
       .from('invoices')
@@ -301,6 +398,7 @@ export default function Invoices() {
     }
   };
 
+  // ========== BAYAR INVOICE ==========
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     const paid = invoice.paid_amount || 0;
@@ -476,16 +574,17 @@ export default function Invoices() {
                         <Eye className="w-4 h-4" />
                       </button>
                       {invoice.status === 'draft' && (
-                        <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                        <button onClick={() => handleOpenEditModal(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
                           <Edit className="w-4 h-4" />
                         </button>
                       )}
-                      {(invoice.status === 'draft' || invoice.status === 'sent') && (
+                      {(invoice.status === 'draft' || invoice.status === 'sent' || invoice.status === 'verified') && (
                         <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Verifikasi">
                           <CheckCircle className="w-4 h-4" />
                         </button>
                       )}
-                      {invoice.status !== 'paid' && invoice.status !== 'partial' && (
+                      {/* Tombol Bayar muncul SELALU kecuali status paid */}
+                      {invoice.status !== 'paid' && (
                         <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Bayar">
                           <DollarSign className="w-4 h-4" />
                         </button>
@@ -640,6 +739,105 @@ export default function Invoices() {
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => { setShowModal(false); resetForm(); }} className="px-4 py-2 border border-border rounded-lg">Batal</button>
               <button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Invoice</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Invoice */}
+      {showEditModal && selectedInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold text-text">Edit Invoice - {selectedInvoice.invoice_number}</h2>
+              <button onClick={() => setShowEditModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Tanggal Invoice</label>
+                  <input type="date" value={editForm.invoice_date} onChange={(e) => setEditForm({ ...editForm, invoice_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Jatuh Tempo</label>
+                  <input type="date" value={editForm.due_date} onChange={(e) => setEditForm({ ...editForm, due_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text mb-1">Item</label>
+                <button onClick={addEditItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-background">
+                      <tr>
+                        <th className="px-2 py-2 text-left text-xs text-text-muted">Deskripsi</th>
+                        <th className="px-2 py-2 text-center text-xs text-text-muted w-20">Qty</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Harga</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Diskon</th>
+                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Jumlah</th>
+                        <th className="w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editItems.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="px-2 py-2">
+                            <input type="text" placeholder="Deskripsi" value={item.description} onChange={(e) => handleEditItem(idx, 'description', e.target.value)} className="w-full px-2 py-1 border border-border rounded text-sm" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.quantity} onChange={(e) => handleEditItem(idx, 'quantity', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.unit_price} onChange={(e) => handleEditItem(idx, 'unit_price', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={item.discount} onChange={(e) => handleEditItem(idx, 'discount', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
+                          </td>
+                          <td className="px-2 py-2 text-right text-sm font-mono">
+                            {formatCurrency(item.amount)}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <button onClick={() => removeEditItem(idx)}>
+                              <Trash2 className="w-4 h-4 text-danger" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-background">
+                      <tr>
+                        <td colSpan={4} className="px-2 py-2 text-right font-medium">Subtotal</td>
+                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(calculateEditTotals().subtotal)}</td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} className="px-2 py-2 text-right font-medium">PPN {currentCompany?.id === 1 ? '11%' : '1.1%'}</td>
+                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(calculateEditTotals().ppn)}</td>
+                        <td></td>
+                      </tr>
+                      <tr className="font-bold">
+                        <td colSpan={4} className="px-2 py-2 text-right">TOTAL</td>
+                        <td className="px-2 py-2 text-right text-accent">{formatCurrency(calculateEditTotals().total)}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text mb-1">Catatan</label>
+                <textarea rows={2} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={handleSaveEdit} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Perubahan</button>
             </div>
           </div>
         </div>

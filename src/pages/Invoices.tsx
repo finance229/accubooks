@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen } from 'lucide-react';
+import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
@@ -19,6 +19,8 @@ type Invoice = {
   total: number;
   status: string;
   notes: string;
+  paid_amount: number;
+  last_payment_date: string;
 };
 
 type InvoiceItem = {
@@ -57,6 +59,10 @@ export default function Invoices() {
   const [showModal, setShowModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState('transfer');
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -178,6 +184,7 @@ export default function Invoices() {
         status: 'draft',
         notes: formData.notes,
         created_by: user?.email,
+        paid_amount: 0,
       }])
       .select();
 
@@ -225,20 +232,17 @@ export default function Invoices() {
   // ========== DOWNLOAD PDF ==========
   const handleDownloadPDF = async (invoice: Invoice) => {
     try {
-      // Ambil detail items
       const { data: items } = await supabase
         .from('invoice_items')
         .select('*')
         .eq('invoice_id', invoice.id);
       
-      // Ambil data perusahaan
       const { data: company } = await supabase
         .from('companies')
         .select('*')
         .eq('id', currentCompany?.id)
         .single();
       
-      // Ambil data customer
       const { data: customer } = await supabase
         .from('contacts')
         .select('*')
@@ -247,7 +251,6 @@ export default function Invoices() {
       
       const html = generateInvoiceHTML(invoice, company, customer, items || []);
       
-      // Buka di tab baru untuk print (bisa save as PDF)
       const win = window.open();
       win?.document.write(html);
       win?.document.close();
@@ -260,7 +263,6 @@ export default function Invoices() {
   // ========== KIRIM EMAIL ==========
   const handleSendEmail = async (invoice: Invoice) => {
     try {
-      // Ambil data customer
       const { data: customer } = await supabase
         .from('contacts')
         .select('email')
@@ -272,9 +274,7 @@ export default function Invoices() {
         return;
       }
       
-      // Buat link invoice (opsional, bisa diganti dengan link download PDF)
       const link = `${window.location.origin}/invoices/${invoice.id}`;
-      
       const subject = `Invoice ${invoice.invoice_number} dari ${currentCompany?.name}`;
       const body = `Yth. ${invoice.customer_name},\n\nBerikut adalah invoice untuk transaksi Anda.\n\nLink invoice: ${link}\n\nTerima kasih atas kepercayaan Anda.\n\nSalam,\n${currentCompany?.name}`;
       
@@ -283,6 +283,78 @@ export default function Invoices() {
       console.error('Error sending email:', error);
       alert('Gagal membuka email client');
     }
+  };
+
+  // ========== EDIT INVOICE ==========
+  const handleEditInvoice = (invoice: Invoice) => {
+    alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
+  };
+
+  // ========== VERIFIKASI INVOICE ==========
+  const handleVerifyInvoice = async (invoice: Invoice) => {
+    const { error } = await supabase
+      .from('invoices')
+      .update({ status: 'verified' })
+      .eq('id', invoice.id);
+    
+    if (error) {
+      alert('Gagal verifikasi invoice');
+    } else {
+      alert('Invoice berhasil diverifikasi. Tanda tangan akan muncul di PDF.');
+      fetchInvoices();
+    }
+  };
+
+  // ========== BAYAR INVOICE ==========
+  const handleOpenPaymentModal = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    const paid = invoice.paid_amount || 0;
+    const remaining = invoice.total - paid;
+    setPaymentAmount(remaining.toString());
+    setShowPaymentModal(true);
+  };
+
+  const handleRecordPayment = async () => {
+    if (!selectedInvoice) return;
+    
+    const amount = parseInt(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Masukkan jumlah pembayaran yang valid');
+      return;
+    }
+    
+    const currentPaid = selectedInvoice.paid_amount || 0;
+    const newPaid = currentPaid + amount;
+    const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
+    
+    const { error: invoiceError } = await supabase
+      .from('invoices')
+      .update({ 
+        paid_amount: newPaid,
+        status: newStatus,
+        last_payment_date: paymentDate
+      })
+      .eq('id', selectedInvoice.id);
+    
+    if (invoiceError) {
+      alert('Gagal mencatat pembayaran');
+      return;
+    }
+    
+    await supabase
+      .from('invoice_payments')
+      .insert([{
+        invoice_id: selectedInvoice.id,
+        payment_date: paymentDate,
+        amount: amount,
+        payment_method: paymentMethod,
+        created_by: user?.email,
+      }]);
+    
+    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat`);
+    setShowPaymentModal(false);
+    setPaymentAmount('');
+    fetchInvoices();
   };
 
   const filteredInvoices = invoices.filter(inv => {
@@ -296,6 +368,7 @@ export default function Invoices() {
     const badges: Record<string, string> = {
       draft: 'bg-gray-100 text-gray-800',
       sent: 'bg-blue-100 text-blue-800',
+      verified: 'bg-green-100 text-green-800',
       partial: 'bg-yellow-100 text-yellow-800',
       paid: 'bg-green-100 text-green-800',
       cancelled: 'bg-red-100 text-red-800',
@@ -307,6 +380,7 @@ export default function Invoices() {
     const labels: Record<string, string> = {
       draft: 'Draft',
       sent: 'Terkirim',
+      verified: 'Terverifikasi',
       partial: 'Dibayar Sebagian',
       paid: 'Lunas',
       cancelled: 'Dibatalkan',
@@ -318,7 +392,7 @@ export default function Invoices() {
     total: invoices.length,
     totalAmount: invoices.reduce((sum, inv) => sum + inv.total, 0),
     paid: invoices.filter(i => i.status === 'paid').length,
-    pending: invoices.filter(i => i.status === 'sent' || i.status === 'partial').length,
+    pending: invoices.filter(i => i.status === 'sent' || i.status === 'partial' || i.status === 'verified').length,
   };
 
   if (!currentCompany) {
@@ -363,7 +437,7 @@ export default function Invoices() {
             <input type="text" placeholder="Cari nomor invoice atau customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" />
           </div>
           <div className="flex gap-2">
-            {['all', 'draft', 'sent', 'partial', 'paid'].map(status => (
+            {['all', 'draft', 'sent', 'verified', 'partial', 'paid'].map(status => (
               <button key={status} onClick={() => setFilterStatus(status)} className={`px-4 py-2.5 rounded-lg font-medium capitalize ${filterStatus === status ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>
                 {status === 'all' ? 'Semua' : getStatusLabel(status)}
               </button>
@@ -387,7 +461,7 @@ export default function Invoices() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
+                <tr><td colSpan={6} className="text-center py-8">Loading...<\/td></tr>
               ) : (
                 filteredInvoices.map((invoice) => (
                   <tr key={invoice.id} className="hover:bg-background transition-colors">
@@ -405,6 +479,21 @@ export default function Invoices() {
                         <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
                           <Eye className="w-4 h-4" />
                         </button>
+                        {invoice.status === 'draft' && (
+                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {(invoice.status === 'draft' || invoice.status === 'sent') && (
+                          <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Verifikasi">
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {invoice.status !== 'paid' && invoice.status !== 'partial' && (
+                          <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Bayar">
+                            <DollarSign className="w-4 h-4" />
+                          </button>
+                        )}
                         <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
                           <Download className="w-4 h-4" />
                         </button>
@@ -413,7 +502,7 @@ export default function Invoices() {
                         </button>
                       </div>
                     </td>
-                  </tr>
+                  </table>
                 ))
               )}
             </tbody>
@@ -577,6 +666,8 @@ export default function Invoices() {
               <p><strong>Subtotal:</strong> {formatCurrency(selectedInvoice.subtotal)}</p>
               <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn)}</p>
               <p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p>
+              <p><strong>Sudah Dibayar:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}</p>
+              <p><strong>Sisa:</strong> {formatCurrency((selectedInvoice.total || 0) - (selectedInvoice.paid_amount || 0))}</p>
               <p><strong>Status:</strong> 
                 <span className={`inline-flex ml-2 px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(selectedInvoice.status)}`}>
                   {getStatusLabel(selectedInvoice.status)}
@@ -588,6 +679,31 @@ export default function Invoices() {
               <button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">
                 <Download className="w-4 h-4 inline mr-2" /> Download PDF
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Pembayaran */}
+      {showPaymentModal && selectedInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold text-text">Pembayaran Invoice</h2>
+              <button onClick={() => setShowPaymentModal(false)} className="text-gray-500">✕</button>
+            </div>
+            <div className="space-y-4">
+              <div><p className="text-sm text-text-muted">No. Invoice</p><p className="font-semibold">{selectedInvoice.invoice_number}</p></div>
+              <div><p className="text-sm text-text-muted">Total Tagihan</p><p className="font-semibold">{formatCurrency(selectedInvoice.total)}</p></div>
+              <div><p className="text-sm text-text-muted">Sudah Dibayar</p><p className="font-semibold text-success">{formatCurrency(selectedInvoice.paid_amount || 0)}</p></div>
+              <div><p className="text-sm text-text-muted">Sisa Tagihan</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Metode Pembayaran</label><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg"><option value="transfer">Transfer Bank</option><option value="cash">Tunai</option><option value="credit_card">Kartu Kredit</option></select></div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={handleRecordPayment} className="px-4 py-2 bg-accent text-white rounded-lg">Catat Pembayaran</button>
             </div>
           </div>
         </div>

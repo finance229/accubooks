@@ -18,6 +18,8 @@ import Login from './pages/Login';
 import SelectCompany from './pages/SelectCompany';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import Vendors from './pages/Vendors';
+import PurchaseInvoices from './pages/PurchaseInvoices';
 
 function App() {
   return (
@@ -46,6 +48,9 @@ function App() {
               <Route path="fixed-assets" element={<FixedAssets />} />
               <Route path="settings" element={<Settings />} />
               <Route path="projects" element={<Projects />} />
+              <Route path="vendors" element={<Vendors />} />
+              <Route path="purchase-invoices" element={<PurchaseInvoices />} />
+
             </Route>
           </Routes>
         </CompanyProvider>

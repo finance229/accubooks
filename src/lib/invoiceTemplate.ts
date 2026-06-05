@@ -14,6 +14,18 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
+  // Tentukan cap berdasarkan status
+  let paymentStamp = '';
+  let stampClass = '';
+  
+  if (invoice.status === 'paid') {
+    paymentStamp = 'LUNAS';
+    stampClass = 'stamp-paid';
+  } else if (invoice.status === 'partial') {
+    paymentStamp = 'PARTIAL';
+    stampClass = 'stamp-partial';
+  }
+
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -24,7 +36,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
       <tr>
         <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; vertical-align: top;">
           ${item.description}
-          <span style="font-size: 10px; color: #555;">${item.notes || ''}</span>
+          ${item.notes ? `<br><span style="font-size: 10px; color: #555;">${item.notes}</span>` : ''}
         </td>
         <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; text-align: right;">${formatRupiah(itemTotal)}</td>
         <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; text-align: center;">${item.quantity}</td>
@@ -35,6 +47,8 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
 
   const ppn = Math.round(totalSubtotal * 0.11);
   const grandTotal = totalSubtotal + ppn;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
 
   return `<!DOCTYPE html>
 <html>
@@ -44,7 +58,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Times New Roman', Times, serif; background: #e0e0e0; display: flex; justify-content: center; padding: 20px; }
-    .invoice { width: 21cm; min-height: 29.7cm; background: white; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+    .invoice { width: 21cm; min-height: 29.7cm; background: white; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; position: relative; }
     .banner { background: #0a1628; padding: 20px 30px; }
     .banner-top { display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
     .logo { width: 70px; height: 70px; background: linear-gradient(135deg, #d4a017, #b8860b); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: white; }
@@ -71,6 +85,40 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     .summary-table { width: 100%; margin-bottom: 20px; }
     .summary-table td { padding: 3px 0; font-size: 11px; }
     .summary-table .grand-total td { font-weight: bold; padding-top: 8px; border-top: 1px solid #000; }
+    
+    /* Cap LUNAS / PARTIAL */
+    .stamp-container {
+      position: absolute;
+      top: 35%;
+      right: 8%;
+      opacity: 0.75;
+      transform: rotate(-15deg);
+      pointer-events: none;
+      z-index: 10;
+    }
+    .stamp-paid {
+      border: 4px solid #dc2626;
+      color: #dc2626;
+      font-size: 42px;
+      font-weight: bold;
+      padding: 10px 20px;
+      border-radius: 16px;
+      background: rgba(220, 38, 38, 0.05);
+      font-family: Arial, sans-serif;
+      letter-spacing: 4px;
+    }
+    .stamp-partial {
+      border: 4px solid #f59e0b;
+      color: #f59e0b;
+      font-size: 36px;
+      font-weight: bold;
+      padding: 8px 16px;
+      border-radius: 16px;
+      background: rgba(245, 158, 11, 0.05);
+      font-family: Arial, sans-serif;
+      letter-spacing: 4px;
+    }
+    
     .payment-section { margin-bottom: 30px; }
     .payment-title { font-weight: bold; font-size: 12px; margin-bottom: 6px; }
     .payment-details { font-size: 11px; line-height: 1.5; }
@@ -81,16 +129,25 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     .footer { background: #f8f8f8; padding: 15px 30px; border-top: 2px solid #d4a017; text-align: center; margin-top: auto; }
     .thankyou { font-weight: bold; font-size: 13px; color: #0a1628; margin-bottom: 10px; letter-spacing: 1px; }
     .contact { font-size: 9px; color: #555; line-height: 1.6; }
+    
     @media print {
       body { background: white; padding: 0; margin: 0; }
       .invoice { box-shadow: none; margin: 0; width: 100%; }
       .banner { background: #0a1628 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .gold-separator { background: #d4a017 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .stamp-paid { border-color: #dc2626 !important; color: #dc2626 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .stamp-partial { border-color: #f59e0b !important; color: #f59e0b !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
   <div class="invoice">
+    ${paymentStamp ? `
+    <div class="stamp-container">
+      <div class="${stampClass}">${paymentStamp}</div>
+    </div>
+    ` : ''}
+    
     <div class="banner">
       <div class="banner-top">
         <div class="logo">AK</div>
@@ -136,9 +193,13 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         <tbody>${itemsHtml}</tbody>
       </table>
       <table class="summary-table">
-        <tr><td style="width: 85%; text-align: right;">Total</td><td style="width: 15%; text-align: right;">${formatRupiah(totalSubtotal)}</td></tr>
+        <tr><td style="width: 70%; text-align: right;">Total</td><td style="width: 30%; text-align: right;">${formatRupiah(totalSubtotal)}</td></tr>
         <tr><td style="text-align: right;">VAT 11%</td><td style="text-align: right;">${formatRupiah(ppn)}</td></tr>
         <tr class="grand-total"><td style="text-align: right;"><strong>Grand Total</strong></td><td style="text-align: right;"><strong>${formatRupiah(grandTotal)}</strong></td></tr>
+        ${paidAmount > 0 ? `
+        <tr><td style="text-align: right; color: #059669;">Sudah Dibayar</td><td style="text-align: right; color: #059669;">(${formatRupiah(paidAmount)})</td></tr>
+        <tr><td style="text-align: right; font-weight: bold;">Sisa Tagihan</td><td style="text-align: right; font-weight: bold;">${formatRupiah(remainingAmount)}</td></tr>
+        ` : ''}
       </table>
       <div class="payment-section">
         <div class="payment-title">PAYMENT METHODS</div>
@@ -150,7 +211,11 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         </div>
       </div>
       <div class="signature">
-        <div class="signature-line"></div>
+        ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') ? (
+          company?.signature_url ? 
+            `<img src="${company.signature_url}" style="width: 150px; height: auto; margin-bottom: 5px;" />` : 
+            `<div class="signature-line"></div>`
+        ) : `<div class="signature-line"></div>`}
         <div class="signature-name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="signature-title">Direktur Utama</div>
       </div>

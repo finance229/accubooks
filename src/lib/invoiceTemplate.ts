@@ -1,3 +1,5 @@
+// src/lib/invoiceTemplate.ts
+
 export function generateInvoiceHTML(invoice: any, company: any, customer: any, items: any[]) {
   const formatRupiah = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -14,7 +16,6 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // Tentukan cap berdasarkan status
   let paymentStamp = '';
   let stampClass = '';
   
@@ -61,7 +62,8 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     .invoice { width: 21cm; min-height: 29.7cm; background: white; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; position: relative; }
     .banner { background: #0a1628; padding: 20px 30px; }
     .banner-top { display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
-    .logo { width: 70px; height: 70px; background: linear-gradient(135deg, #d4a017, #b8860b); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: white; }
+    .logo { width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; }
+    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
     .company-info { flex: 1; }
     .company-info h1 { color: white; font-size: 22px; letter-spacing: 1px; margin-bottom: 4px; }
     .company-info p { color: #aaa; font-size: 11px; }
@@ -86,7 +88,6 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     .summary-table td { padding: 3px 0; font-size: 11px; }
     .summary-table .grand-total td { font-weight: bold; padding-top: 8px; border-top: 1px solid #000; }
     
-    /* Cap LUNAS / PARTIAL */
     .stamp-container {
       position: absolute;
       top: 35%;
@@ -96,36 +97,20 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
       pointer-events: none;
       z-index: 10;
     }
-    .stamp-paid {
-      border: 4px solid #dc2626;
-      color: #dc2626;
-      font-size: 42px;
-      font-weight: bold;
-      padding: 10px 20px;
-      border-radius: 16px;
-      background: rgba(220, 38, 38, 0.05);
-      font-family: Arial, sans-serif;
-      letter-spacing: 4px;
-    }
-    .stamp-partial {
-      border: 4px solid #f59e0b;
-      color: #f59e0b;
-      font-size: 36px;
-      font-weight: bold;
-      padding: 8px 16px;
-      border-radius: 16px;
-      background: rgba(245, 158, 11, 0.05);
-      font-family: Arial, sans-serif;
-      letter-spacing: 4px;
-    }
+    .stamp-paid { border: 4px solid #dc2626; color: #dc2626; font-size: 42px; font-weight: bold; padding: 10px 20px; border-radius: 16px; background: rgba(220,38,38,0.05); font-family: Arial, sans-serif; letter-spacing: 4px; }
+    .stamp-partial { border: 4px solid #f59e0b; color: #f59e0b; font-size: 36px; font-weight: bold; padding: 8px 16px; border-radius: 16px; background: rgba(245,158,11,0.05); font-family: Arial, sans-serif; letter-spacing: 4px; }
     
-    .payment-section { margin-bottom: 30px; }
+    .payment-section { margin-bottom: 20px; }
     .payment-title { font-weight: bold; font-size: 12px; margin-bottom: 6px; }
     .payment-details { font-size: 11px; line-height: 1.5; }
-    .signature { text-align: right; margin-top: 40px; margin-bottom: 20px; }
-    .signature-line { width: 180px; margin-left: auto; border-top: 1px solid #000; margin-bottom: 5px; }
+    
+    /* Signature - DIPERKECIL dan DIBERI JARAK YANG PAS */
+    .signature { text-align: right; margin-top: 20px; margin-bottom: 10px; }
+    .signature-img { max-width: 100px; height: auto; margin-bottom: 4px; }
+    .signature-line { width: 150px; margin-left: auto; border-top: 1px solid #000; margin-bottom: 4px; }
     .signature-name { font-size: 11px; font-weight: bold; }
     .signature-title { font-size: 10px; }
+    
     .footer { background: #f8f8f8; padding: 15px 30px; border-top: 2px solid #d4a017; text-align: center; margin-top: auto; }
     .thankyou { font-weight: bold; font-size: 13px; color: #0a1628; margin-bottom: 10px; letter-spacing: 1px; }
     .contact { font-size: 9px; color: #555; line-height: 1.6; }
@@ -142,15 +127,13 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
 </head>
 <body>
   <div class="invoice">
-    ${paymentStamp ? `
-    <div class="stamp-container">
-      <div class="${stampClass}">${paymentStamp}</div>
-    </div>
-    ` : ''}
+    ${paymentStamp ? `<div class="stamp-container"><div class="${stampClass}">${paymentStamp}</div></div>` : ''}
     
     <div class="banner">
       <div class="banner-top">
-        <div class="logo">AK</div>
+        <div class="logo">
+          ${company?.logo_url ? `<img src="${company.logo_url}" alt="Logo">` : '<div style="width:70px;height:70px;background:#d4a017;border-radius:50%;"></div>'}
+        </div>
         <div class="company-info">
           <h1>${company?.name?.toUpperCase() || 'ARTHA KONDANG'}</h1>
           <p>${company?.name || 'PT Artha Kondang Internasional'}</p>
@@ -161,14 +144,8 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         </div>
       </div>
       <div class="banner-dates">
-        <div class="date-item">
-          <div class="date-label">INVOICE DATE</div>
-          <div class="date-value">${formatDate(invoice.invoice_date)}</div>
-        </div>
-        <div class="date-item">
-          <div class="date-label">DUE DATE</div>
-          <div class="date-value">${formatDate(invoice.due_date)}</div>
-        </div>
+        <div class="date-item"><div class="date-label">INVOICE DATE</div><div class="date-value">${formatDate(invoice.invoice_date)}</div></div>
+        <div class="date-item"><div class="date-label">DUE DATE</div><div class="date-value">${formatDate(invoice.due_date)}</div></div>
       </div>
     </div>
     <div class="gold-separator"></div>
@@ -182,14 +159,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         </div>
       </div>
       <table class="items-table">
-        <thead>
-          <tr>
-            <th style="width: 45%">DESCRIPTION</th>
-            <th style="width: 20%" class="text-right">SUB TOTAL</th>
-            <th style="width: 15%" class="text-center">QTY</th>
-            <th style="width: 20%" class="text-right">TOTAL</th>
-          </tr>
-        </thead>
+        <thead><tr><th style="width: 45%">DESCRIPTION</th><th style="width: 20%" class="text-right">SUB TOTAL</th><th style="width: 15%" class="text-center">QTY</th><th style="width: 20%" class="text-right">TOTAL</th></tr></thead>
         <tbody>${itemsHtml}</tbody>
       </table>
       <table class="summary-table">
@@ -211,11 +181,10 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         </div>
       </div>
       <div class="signature">
-        ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') ? (
-          company?.signature_url ? 
-            `<img src="${company.signature_url}" style="width: 150px; height: auto; margin-bottom: 5px;" />` : 
-            `<div class="signature-line"></div>`
-        ) : `<div class="signature-line"></div>`}
+        ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') && company?.signature_url ? 
+          `<img src="${company.signature_url}" class="signature-img" />` : 
+          `<div class="signature-line"></div>`
+        }
         <div class="signature-name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="signature-title">Direktur Utama</div>
       </div>
@@ -223,7 +192,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     <div class="footer">
       <div class="thankyou">THANK YOU FOR YOUR BUSINESS</div>
       <div class="contact">
-        ${company?.phone || '+62821-3017-2363'} | ${company?.website || 'arthakondanginternasional.co.id'} | ${company?.email || 'finance@arthakondang.co.id'}<br>
+        ${company?.phone || '+62821-3017-2363'} | ${company?.email || 'finance@arthakondang.co.id'}<br>
         ${company?.address || 'Taman Tekno X BSD Blok G No 2, Tangerang Selatan - Banten 15314'}
       </div>
     </div>

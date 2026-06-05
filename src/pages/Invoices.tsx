@@ -229,7 +229,6 @@ export default function Invoices() {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
   };
 
-  // ========== DOWNLOAD PDF ==========
   const handleDownloadPDF = async (invoice: Invoice) => {
     try {
       const { data: items } = await supabase
@@ -260,7 +259,6 @@ export default function Invoices() {
     }
   };
 
-  // ========== KIRIM EMAIL ==========
   const handleSendEmail = async (invoice: Invoice) => {
     try {
       const { data: customer } = await supabase
@@ -285,12 +283,10 @@ export default function Invoices() {
     }
   };
 
-  // ========== EDIT INVOICE ==========
   const handleEditInvoice = (invoice: Invoice) => {
     alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
   };
 
-  // ========== VERIFIKASI INVOICE ==========
   const handleVerifyInvoice = async (invoice: Invoice) => {
     const { error } = await supabase
       .from('invoices')
@@ -305,7 +301,6 @@ export default function Invoices() {
     }
   };
 
-  // ========== BAYAR INVOICE ==========
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     const paid = invoice.paid_amount || 0;
@@ -446,68 +441,68 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div className="bg-surface rounded-xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-background">
+      <div className="bg-surface rounded-xl border border-border overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-background">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Invoice</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Customer</th>
+              <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Total</th>
+              <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
+              <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {loading ? (
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Invoice</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Customer</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Total</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
+                <td colSpan={6} className="text-center py-8">Loading...</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
-              ) : (
-                filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-background transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
-                    <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
-                        {getStatusLabel(invoice.status)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
-                          <Eye className="w-4 h-4" />
+            ) : (
+              filteredInvoices.map((invoice) => (
+                <tr key={invoice.id} className="hover:bg-background transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
+                  <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
+                      {getStatusLabel(invoice.status)}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      {invoice.status === 'draft' && (
+                        <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                          <Edit className="w-4 h-4" />
                         </button>
-                        {invoice.status === 'draft' && (
-                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                        )}
-                        {(invoice.status === 'draft' || invoice.status === 'sent') && (
-                          <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Verifikasi">
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                        {invoice.status !== 'paid' && invoice.status !== 'partial' && (
-                          <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Bayar">
-                            <DollarSign className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
-                          <Download className="w-4 h-4" />
+                      )}
+                      {(invoice.status === 'draft' || invoice.status === 'sent') && (
+                        <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Verifikasi">
+                          <CheckCircle className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Kirim ke Email">
-                          <Send className="w-4 h-4" />
+                      )}
+                      {invoice.status !== 'paid' && invoice.status !== 'partial' && (
+                        <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Bayar">
+                          <DollarSign className="w-4 h-4" />
                         </button>
-                      </div>
-                    </td>
-                  </table>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                      )}
+                      <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
+                        <Download className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Kirim ke Email">
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Modal Buat Invoice */}
@@ -699,7 +694,11 @@ export default function Invoices() {
               <div><p className="text-sm text-text-muted">Sisa Tagihan</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
               <div><label className="block text-sm font-medium text-text mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
               <div><label className="block text-sm font-medium text-text mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium text-text mb-1">Metode Pembayaran</label><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg"><option value="transfer">Transfer Bank</option><option value="cash">Tunai</option><option value="credit_card">Kartu Kredit</option></select></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Metode Pembayaran</label><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg">
+                <option value="transfer">Transfer Bank</option>
+                <option value="cash">Tunai</option>
+                <option value="credit_card">Kartu Kredit</option>
+              </select></div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>

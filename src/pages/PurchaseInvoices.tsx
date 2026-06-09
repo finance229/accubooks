@@ -424,9 +424,9 @@ export default function PurchaseInvoices() {
     }
 
     // Dapatkan akun default
-    const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
-    const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
-    const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
+   const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
+  const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
+  const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
     const debitAcc = coaList.find(c => c.id === verifyData.debitAccountId);
     
     if (!debitAcc || !payableAcc) {

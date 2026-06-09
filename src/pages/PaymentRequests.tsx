@@ -121,13 +121,15 @@ export default function PaymentRequests() {
   };
 
   const fetchCoa = async () => {
-    if (!currentCompany?.id) return;
-    const { data } = await supabase
-      .from('coa')
-      .select('id, code, name, type')
-      .eq('company_id', currentCompany.id);
-    setCoaList(data || []);
-  };
+  if (!currentCompany?.id) return;
+  const { data } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', currentCompany.id)
+    .eq('is_active', true)
+    .order('code');
+  setCoaList(data || []);
+};
 
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;

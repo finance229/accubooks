@@ -1,29 +1,98 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, TrendingUp, FolderOpen, CreditCard, FolderKanban, LogOut } from 'lucide-react';
 import { useState } from 'react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { 
+  LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, 
+  TrendingUp, FolderOpen, CreditCard, FolderKanban, Truck, 
+  BookOpen, BookMarked, Book, BarChart3, Repeat, Database, 
+  ChevronDown, ChevronRight, LogOut 
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import CompanyDropdown from './CompanyDropdown';
-import { Truck, FileText as FileTextIcon } from 'lucide-react';
 
-const navigation = [
-  { name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
-  { name: 'Transaksi', to: '/transactions', icon: Receipt },
-  { name: 'Invoice', to: '/invoices', icon: FileText },
-  { name: 'Payment Requests', to: '/payment-requests', icon: CreditCard },
-  { name: 'Proyek', to: '/projects', icon: FolderKanban },
-  { name: 'Dokumen', to: '/documents', icon: FolderOpen },
-  { name: 'Kontak', to: '/contacts', icon: Users },
-  { name: 'Laporan', to: '/reports', icon: FileText },
-  { name: 'Pengaturan', to: '/settings', icon: Settings },
-  { name: 'Vendor', to: '/vendors', icon: Truck },
-  { name: 'Account Payable', to: '/purchase-invoices', icon: FileTextIcon },
+type MenuItem = {
+  name: string;
+  to: string;
+  icon: any;
+};
+
+type MenuGroup = {
+  name: string;
+  icon: any;
+  items: MenuItem[];
+};
+
+const menuGroups: MenuGroup[] = [
+  {
+    name: 'Dashboard',
+    icon: LayoutDashboard,
+    items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard }]
+  },
+  {
+    name: 'Akuntansi & Keuangan',
+    icon: Database,
+    items: [
+      { name: 'Transaksi', to: '/transactions', icon: Receipt },
+      { name: 'Jurnal Umum', to: '/journal-entries', icon: BookOpen },
+      { name: 'Buku Besar', to: '/ledger', icon: Book },
+      { name: 'Chart of Accounts', to: '/chart-of-accounts', icon: BookMarked },
+    ]
+  },
+  {
+    name: 'Piutang & Hutang',
+    icon: CreditCard,
+    items: [
+      { name: 'Invoice (AR)', to: '/invoices', icon: FileText },
+      { name: 'Account Payable (AP)', to: '/purchase-invoices', icon: Truck },
+      { name: 'Payment Requests', to: '/payment-requests', icon: CreditCard },
+    ]
+  },
+  {
+    name: 'Manajemen',
+    icon: FolderKanban,
+    items: [
+      { name: 'Proyek', to: '/projects', icon: FolderKanban },
+      { name: 'Kontak', to: '/contacts', icon: Users },
+      { name: 'Vendor', to: '/vendors', icon: Truck },
+      { name: 'Dokumen', to: '/documents', icon: FolderOpen },
+      { name: 'Fixed Assets', to: '/fixed-assets', icon: TrendingUp },
+      { name: 'Transaksi Berulang', to: '/recurring-transactions', icon: Repeat },
+    ]
+  },
+  {
+    name: 'Laporan',
+    icon: BarChart3,
+    items: [
+      { name: 'Laba Rugi', to: '/income-statement', icon: TrendingUp },
+      { name: 'Neraca', to: '/balance-sheet', icon: BarChart3 },
+      { name: 'Laporan Umum', to: '/reports', icon: FileText },
+    ]
+  },
+  {
+    name: 'Pengaturan',
+    icon: Settings,
+    items: [
+      { name: 'Pengaturan', to: '/settings', icon: Settings },
+    ]
+  },
 ];
+
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Dashboard', 'Akuntansi & Keuangan', 'Piutang & Hutang']));
   const { user, signOut } = useAuth();
   const { currentCompany } = useCompany();
   const navigate = useNavigate();
+
+  const toggleGroup = (groupName: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(groupName)) {
+      newExpanded.delete(groupName);
+    } else {
+      newExpanded.add(groupName);
+    }
+    setExpandedGroups(newExpanded);
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -37,6 +106,7 @@ export default function Layout() {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
         <div className="flex h-full flex-col">
+          {/* LOGO */}
           <div className="flex h-16 items-center justify-between px-6 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center">
@@ -48,28 +118,53 @@ export default function Layout() {
               <X className="w-6 h-6" />
             </button>
           </div>
-          
-          <nav className="flex-1 px-4 py-6 space-y-1">
-            {navigation.map((item) => (
-              <NavLink
-                key={item.name}
-                to={item.to}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isActive
-                      ? 'bg-accent text-white shadow-lg shadow-accent/30'
-                      : 'text-white/70 hover:text-white hover:bg-sidebar-hover'
-                  }`
-                }
-              >
-                <item.icon className="w-5 h-5" />
-                {item.name}
-              </NavLink>
-            ))}
+
+          {/* NAVIGATION */}
+          <nav className="flex-1 px-4 py-6 overflow-y-auto">
+            {menuGroups.map((group) => {
+              const isExpanded = expandedGroups.has(group.name);
+              const Icon = group.icon;
+              
+              return (
+                <div key={group.name} className="mb-2">
+                  <button
+                    onClick={() => toggleGroup(group.name)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-sidebar-hover transition-all duration-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className="w-5 h-5" />
+                      <span>{group.name}</span>
+                    </div>
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  
+                  {isExpanded && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      {group.items.map((item) => (
+                        <NavLink
+                          key={item.name}
+                          to={item.to}
+                          onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) =>
+                            `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                              isActive
+                                ? 'bg-accent text-white shadow-lg shadow-accent/30'
+                                : 'text-white/70 hover:text-white hover:bg-sidebar-hover'
+                            }`
+                          }
+                        >
+                          <item.icon className="w-4 h-4" />
+                          {item.name}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </nav>
-          
-          {/* USER INFO & LOGOUT */}
+
+          {/* USER INFO */}
           <div className="p-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-hover">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
@@ -94,10 +189,10 @@ export default function Layout() {
           </div>
         </div>
       </aside>
-      
-      {/* OVERLAY UNTUK MOBILE */}
+
+      {/* OVERLAY */}
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
-      
+
       {/* MAIN CONTENT */}
       <div className="lg:pl-64">
         {/* HEADER */}
@@ -105,20 +200,16 @@ export default function Layout() {
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-text-muted hover:text-text">
             <Menu className="w-6 h-6" />
           </button>
-          
           <div className="flex-1" />
-          
           <div className="flex items-center gap-4">
-            {/* DROPDOWN PERUSAHAAN - UNTUK SUPER ADMIN & DIREKTUR */}
             <CompanyDropdown />
-            
             <div className="text-right">
               <p className="text-sm font-medium text-text">{currentCompany?.name || 'AccuBooks'}</p>
               <p className="text-xs text-text-muted">{user?.role || 'User'} • {new Date().getFullYear()}</p>
             </div>
           </div>
         </header>
-        
+
         {/* PAGE CONTENT */}
         <main className="p-6">
           <Outlet />

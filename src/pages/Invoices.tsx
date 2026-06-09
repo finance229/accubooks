@@ -9,7 +9,8 @@ import {
   createGeneralJournal,
   getDefaultAccount,
   createCustomerIfNotExist,
-  createProjectIfNotExist
+  createProjectIfNotExist,
+  getBankAccounts
 } from '../lib/accountingHelpers';
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
 
@@ -137,17 +138,11 @@ export default function Invoices() {
   };
 
   const fetchBankAccounts = async () => {
-    if (!currentCompany?.id) return;
-    const suffix = currentCompany.id === 1 ? 'A' : currentCompany.id === 2 ? 'B' : 'C';
-    const { data } = await supabase
-      .from('coa')
-      .select('id, code, name')
-      .eq('company_id', currentCompany.id)
-      .like('code', `1102-%${suffix}`)
-      .or('code', `1101-%${suffix}`);
-    setBankAccounts(data || []);
-  };
-
+  if (!currentCompany?.id) return;
+  const banks = await getBankAccounts(currentCompany.id);
+  console.log('Bank accounts fetched:', banks); // Debug
+  setBankAccounts(banks);
+};
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );

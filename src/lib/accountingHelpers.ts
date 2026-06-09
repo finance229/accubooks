@@ -164,17 +164,18 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
 // ============================================
 export const getBankAccounts = async (companyId: number) => {
   const suffix = getCompanySuffix(companyId);
+  // Cari akun dengan code yang mengandung bank dan suffix tertentu
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name')
     .eq('company_id', companyId)
-    .like('code', `1102-%${suffix}`)
+    .eq('suffix', suffix)
+    .ilike('name', '%Bank%')
     .order('code');
   
   if (error) return [];
   return data || [];
 };
-
 export const getExpenseAccounts = async (companyId: number) => {
   const { data, error } = await supabase
     .from('coa')

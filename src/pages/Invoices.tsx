@@ -4,6 +4,16 @@ import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
+import { 
+  formatCurrency, 
+  generateVoucherCode, 
+  createGeneralJournal,
+  getDefaultAccount,
+  createCustomerIfNotExist,
+  createProjectIfNotExist,
+  checkProjectBudget,
+  updateProjectSpent
+} from '../lib/accountingHelpers';
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
 
 type Invoice = {
@@ -45,6 +55,8 @@ type Project = {
   id: number;
   code: string;
   name: string;
+  budget: number;
+  spent: number;
 };
 
 export default function Invoices() {
@@ -57,19 +69,22 @@ export default function Invoices() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showModal, setShowModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState('transfer');
-  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
-  const [editForm, setEditForm] = useState({
-    invoice_date: '',
-    due_date: '',
-    notes: '',
-  });
+  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState(0);
+  
+  // State untuk modal buat customer baru
+  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: '', email: '', phone: '', address: '' });
+  
+  // State untuk modal buat proyek baru
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -89,6 +104,7 @@ export default function Invoices() {
       fetchInvoices();
       fetchCustomers();
       fetchProjects();
+      fetchBankAccounts();
     }
   }, [currentCompany]);
 
@@ -110,7 +126,8 @@ export default function Invoices() {
       .from('contacts')
       .select('id, name, type, email, address, phone')
       .eq('company_id', currentCompany.id)
-      .eq('type', 'customer');
+      .eq('type', 'customer')
+      .order('name');
     setCustomers(data || []);
   };
 
@@ -118,9 +135,22 @@ export default function Invoices() {
     if (!currentCompany?.id) return;
     const { data } = await supabase
       .from('projects')
-      .select('id, code, name')
-      .eq('company_id', currentCompany.id);
+      .select('*')
+      .eq('company_id', currentCompany.id)
+      .eq('status', 'active');
     setProjects(data || []);
+  };
+
+  const fetchBankAccounts = async () => {
+    if (!currentCompany?.id) return;
+    const suffix = currentCompany.id === 1 ? 'A' : currentCompany.id === 2 ? 'B' : 'C';
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', currentCompany.id)
+      .like('code', `1102-%${suffix}`)
+      .or('code', `1101-%${suffix}`);
+    setBankAccounts(data || []);
   };
 
   const filteredCustomers = customers.filter(c =>
@@ -163,6 +193,52 @@ export default function Invoices() {
   };
 
   const { subtotal, ppn, total } = calculateTotals();
+
+  const handleCreateCustomer = async () => {
+    if (!newCustomer.name) {
+      alert('Nama customer wajib diisi');
+      return;
+    }
+    try {
+      const customerId = await createCustomerIfNotExist(
+        currentCompany!.id,
+        newCustomer.name,
+        newCustomer.email,
+        newCustomer.phone,
+        newCustomer.address
+      );
+      await fetchCustomers();
+      setFormData({ ...formData, customer_id: customerId, customer_name: newCustomer.name });
+      setCustomerSearch(newCustomer.name);
+      setShowNewCustomerModal(false);
+      setNewCustomer({ name: '', email: '', phone: '', address: '' });
+      alert('Customer berhasil ditambahkan');
+    } catch (error) {
+      alert('Gagal menambahkan customer');
+    }
+  };
+
+  const handleCreateProject = async () => {
+    if (!newProject.code || !newProject.name) {
+      alert('Kode dan nama proyek wajib diisi');
+      return;
+    }
+    try {
+      const projectId = await createProjectIfNotExist(
+        currentCompany!.id,
+        newProject.code,
+        newProject.name,
+        newProject.budget
+      );
+      await fetchProjects();
+      setFormData({ ...formData, project_id: projectId });
+      setShowNewProjectModal(false);
+      setNewProject({ code: '', name: '', budget: 0 });
+      alert('Proyek berhasil ditambahkan');
+    } catch (error) {
+      alert('Gagal menambahkan proyek');
+    }
+  };
 
   const handleCreateInvoice = async () => {
     if (!formData.customer_id || formData.items.length === 0) {
@@ -232,98 +308,179 @@ export default function Invoices() {
     setCustomerSearch('');
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+  // ========== VERIFIKASI INVOICE (dengan jurnal otomatis) ==========
+  const handleVerifyInvoice = async (invoice: Invoice) => {
+    try {
+      // Dapatkan akun default
+      const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+      const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
+      const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
+      
+      if (!receivableAcc || !revenueAcc) {
+        alert('Akun piutang atau pendapatan tidak ditemukan di COA');
+        return;
+      }
+
+      // Siapkan entries jurnal
+      const entries = [
+        {
+          account_id: receivableAcc.id,
+          account_code: receivableAcc.code,
+          account_name: receivableAcc.name,
+          debit: invoice.total,
+          credit: 0,
+        },
+        {
+          account_id: revenueAcc.id,
+          account_code: revenueAcc.code,
+          account_name: revenueAcc.name,
+          debit: 0,
+          credit: invoice.subtotal,
+        },
+      ];
+      
+      if (invoice.ppn > 0 && ppnOutAcc) {
+        entries.push({
+          account_id: ppnOutAcc.id,
+          account_code: ppnOutAcc.code,
+          account_name: ppnOutAcc.name,
+          debit: 0,
+          credit: invoice.ppn,
+        });
+      }
+
+      // Buat jurnal
+      const journalId = await createGeneralJournal(
+        currentCompany!.id,
+        invoice.invoice_date,
+        `Penjualan invoice ${invoice.invoice_number} - ${invoice.customer_name}`,
+        invoice.invoice_number,
+        'INVOICE',
+        invoice.id,
+        entries,
+        invoice.project_id || undefined
+      );
+
+      if (!journalId) {
+        alert('Gagal membuat jurnal');
+        return;
+      }
+
+      // Update status invoice
+      const { error } = await supabase
+        .from('invoices')
+        .update({ status: 'verified' })
+        .eq('id', invoice.id);
+
+      if (error) throw error;
+
+      alert('Invoice berhasil diverifikasi dan jurnal telah dibuat');
+      fetchInvoices();
+    } catch (error) {
+      console.error('Error verifying invoice:', error);
+      alert('Gagal verifikasi invoice');
+    }
   };
 
-  // ========== EDIT INVOICE ==========
-  const handleOpenEditModal = async (invoice: Invoice) => {
+  // ========== PEMBAYARAN INVOICE (dengan jurnal otomatis) ==========
+  const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
-    setEditForm({
-      invoice_date: invoice.invoice_date,
-      due_date: invoice.due_date,
-      notes: invoice.notes || '',
-    });
-    
-    const { data: items } = await supabase
-      .from('invoice_items')
-      .select('*')
-      .eq('invoice_id', invoice.id);
-    
-    setEditItems(items || []);
-    setShowEditModal(true);
+    const remaining = invoice.total - (invoice.paid_amount || 0);
+    setPaymentAmount(remaining.toString());
+    setSelectedBankId(0);
+    setShowPaymentModal(true);
   };
 
-  const handleEditItem = (index: number, field: keyof InvoiceItem, value: any) => {
-    const newItems = [...editItems];
-    newItems[index] = { ...newItems[index], [field]: value };
-    
-    if (field === 'quantity' || field === 'unit_price' || field === 'discount') {
-      const qty = newItems[index].quantity;
-      const price = newItems[index].unit_price;
-      const disc = newItems[index].discount;
-      newItems[index].amount = (qty * price) - disc;
-    }
-    
-    setEditItems(newItems);
-  };
-
-  const addEditItem = () => {
-    setEditItems([...editItems, { description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0 }]);
-  };
-
-  const removeEditItem = (index: number) => {
-    if (editItems.length > 1) {
-      setEditItems(editItems.filter((_, i) => i !== index));
-    }
-  };
-
-  const calculateEditTotals = () => {
-    const subtotal = editItems.reduce((sum, item) => sum + item.amount, 0);
-    const ppnRate = currentCompany?.id === 1 ? 0.11 : 0.011;
-    const ppn = Math.round(subtotal * ppnRate);
-    return { subtotal, ppn, total: subtotal + ppn };
-  };
-
-  const handleSaveEdit = async () => {
+  const handleRecordPayment = async () => {
     if (!selectedInvoice) return;
     
-    const { subtotal: newSubtotal, ppn: newPpn, total: newTotal } = calculateEditTotals();
+    const amount = parseInt(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Masukkan jumlah pembayaran yang valid');
+      return;
+    }
+    if (!selectedBankId) {
+      alert('Pilih akun bank/kas');
+      return;
+    }
     
+    const currentPaid = selectedInvoice.paid_amount || 0;
+    const newPaid = currentPaid + amount;
+    const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
+    
+    // Dapatkan akun yang dipilih
+    const bankAccount = bankAccounts.find(b => b.id === selectedBankId);
+    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+    
+    if (!receivableAcc || !bankAccount) {
+      alert('Akun tidak ditemukan');
+      return;
+    }
+    
+    // Buat jurnal penerimaan kas
+    const entries = [
+      {
+        account_id: bankAccount.id,
+        account_code: bankAccount.code,
+        account_name: bankAccount.name,
+        debit: amount,
+        credit: 0,
+      },
+      {
+        account_id: receivableAcc.id,
+        account_code: receivableAcc.code,
+        account_name: receivableAcc.name,
+        debit: 0,
+        credit: amount,
+      },
+    ];
+    
+    const journalId = await createGeneralJournal(
+      currentCompany!.id,
+      paymentDate,
+      `Penerimaan pembayaran dari ${selectedInvoice.customer_name} untuk invoice ${selectedInvoice.invoice_number}`,
+      selectedInvoice.invoice_number,
+      'INVOICE_PAYMENT',
+      selectedInvoice.id,
+      entries,
+      selectedInvoice.project_id || undefined
+    );
+    
+    if (!journalId) {
+      alert('Gagal membuat jurnal pembayaran');
+      return;
+    }
+    
+    // Update invoice
     const { error: invoiceError } = await supabase
       .from('invoices')
-      .update({
-        invoice_date: editForm.invoice_date,
-        due_date: editForm.due_date,
-        subtotal: newSubtotal,
-        ppn: newPpn,
-        total: newTotal,
-        notes: editForm.notes,
+      .update({ 
+        paid_amount: newPaid,
+        status: newStatus,
+        last_payment_date: paymentDate
       })
       .eq('id', selectedInvoice.id);
     
     if (invoiceError) {
-      alert('Gagal update invoice');
+      alert('Gagal mencatat pembayaran');
       return;
     }
     
-    // Hapus items lama
-    await supabase.from('invoice_items').delete().eq('invoice_id', selectedInvoice.id);
-    
-    // Insert items baru
-    for (const item of editItems) {
-      await supabase.from('invoice_items').insert([{
+    // Catat ke history pembayaran
+    await supabase
+      .from('invoice_payments')
+      .insert([{
         invoice_id: selectedInvoice.id,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        discount: item.discount,
-        amount: item.amount,
+        payment_date: paymentDate,
+        amount: amount,
+        payment_method: paymentMethod,
+        bank_account_id: selectedBankId,
+        created_by: user?.email,
       }]);
-    }
     
-    alert('Invoice berhasil diupdate');
-    setShowEditModal(false);
+    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat`);
+    setShowPaymentModal(false);
+    setPaymentAmount('');
     fetchInvoices();
   };
 
@@ -383,71 +540,9 @@ export default function Invoices() {
     }
   };
 
-  // ========== VERIFIKASI INVOICE ==========
-  const handleVerifyInvoice = async (invoice: Invoice) => {
-    const { error } = await supabase
-      .from('invoices')
-      .update({ status: 'verified' })
-      .eq('id', invoice.id);
-    
-    if (error) {
-      alert('Gagal verifikasi invoice');
-    } else {
-      alert('Invoice berhasil diverifikasi. Tanda tangan akan muncul di PDF.');
-      fetchInvoices();
-    }
-  };
-
-  // ========== BAYAR INVOICE ==========
-  const handleOpenPaymentModal = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    const paid = invoice.paid_amount || 0;
-    const remaining = invoice.total - paid;
-    setPaymentAmount(remaining.toString());
-    setShowPaymentModal(true);
-  };
-
-  const handleRecordPayment = async () => {
-    if (!selectedInvoice) return;
-    
-    const amount = parseInt(paymentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      alert('Masukkan jumlah pembayaran yang valid');
-      return;
-    }
-    
-    const currentPaid = selectedInvoice.paid_amount || 0;
-    const newPaid = currentPaid + amount;
-    const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
-    
-    const { error: invoiceError } = await supabase
-      .from('invoices')
-      .update({ 
-        paid_amount: newPaid,
-        status: newStatus,
-        last_payment_date: paymentDate
-      })
-      .eq('id', selectedInvoice.id);
-    
-    if (invoiceError) {
-      alert('Gagal mencatat pembayaran');
-      return;
-    }
-    
-    await supabase
-      .from('invoice_payments')
-      .insert([{
-        invoice_id: selectedInvoice.id,
-        payment_date: paymentDate,
-        amount: amount,
-        payment_method: paymentMethod,
-        created_by: user?.email,
-      }]);
-    
-    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat`);
-    setShowPaymentModal(false);
-    setPaymentAmount('');
-    fetchInvoices();
+  // ========== EDIT INVOICE ==========
+  const handleEditInvoice = (invoice: Invoice) => {
+    alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
   };
 
   const filteredInvoices = invoices.filter(inv => {
@@ -504,6 +599,7 @@ export default function Invoices() {
         </button>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-surface rounded-xl border border-border p-4">
           <p className="text-text-muted text-xs font-medium">Total Invoice</p>
@@ -523,15 +619,16 @@ export default function Invoices() {
         </div>
       </div>
 
+      {/* Filters */}
       <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
             <input type="text" placeholder="Cari nomor invoice atau customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {['all', 'draft', 'sent', 'verified', 'partial', 'paid'].map(status => (
-              <button key={status} onClick={() => setFilterStatus(status)} className={`px-4 py-2.5 rounded-lg font-medium capitalize ${filterStatus === status ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>
+              <button key={status} onClick={() => setFilterStatus(status)} className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${filterStatus === status ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>
                 {status === 'all' ? 'Semua' : getStatusLabel(status)}
               </button>
             ))}
@@ -539,69 +636,69 @@ export default function Invoices() {
         </div>
       </div>
 
-      <div className="bg-surface rounded-xl border border-border overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-background">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Invoice</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Customer</th>
-              <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Total</th>
-              <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
-              <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {loading ? (
+      {/* Invoices Table */}
+      <div className="bg-surface rounded-xl border border-border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-background">
               <tr>
-                <td colSpan={6} className="text-center py-8">Loading...</td>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Invoice</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Customer</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Total</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
               </tr>
-            ) : (
-              filteredInvoices.map((invoice) => (
-                <tr key={invoice.id} className="hover:bg-background transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
-                  <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
-                      {getStatusLabel(invoice.status)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      {invoice.status === 'draft' && (
-                        <button onClick={() => handleOpenEditModal(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
-                          <Edit className="w-4 h-4" />
+            </thead>
+            <tbody className="divide-y divide-border">
+              {loading ? (
+                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
+              ) : (
+                filteredInvoices.map((invoice) => (
+                  <tr key={invoice.id} className="hover:bg-background transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-semibold text-text">{invoice.invoice_number}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{invoice.invoice_date}</td>
+                    <td className="px-6 py-4 text-sm text-text">{invoice.customer_name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-mono font-semibold text-text">{formatCurrency(invoice.total)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
+                        {getStatusLabel(invoice.status)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
+                          <Eye className="w-4 h-4" />
                         </button>
-                      )}
-                      {(invoice.status === 'draft' || invoice.status === 'sent' || invoice.status === 'verified') && (
-                        <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Verifikasi">
-                          <CheckCircle className="w-4 h-4" />
+                        {invoice.status === 'draft' && (
+                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {(invoice.status === 'draft' || invoice.status === 'sent') && (
+                          <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Verifikasi">
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {invoice.status !== 'paid' && (
+                          <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" title="Bayar">
+                            <DollarSign className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
+                          <Download className="w-4 h-4" />
                         </button>
-                      )}
-                      {/* Tombol Bayar muncul SELALU kecuali status paid */}
-                      {invoice.status !== 'paid' && (
-                        <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Bayar">
-                          <DollarSign className="w-4 h-4" />
+                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Kirim ke Email">
+                          <Send className="w-4 h-4" />
                         </button>
-                      )}
-                      <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Download PDF">
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Kirim ke Email">
-                        <Send className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                      </div>
+                    </td>
+                  <tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Modal Buat Invoice */}
@@ -616,35 +713,44 @@ export default function Invoices() {
             </div>
             
             <div className="space-y-4">
+              {/* Customer Selection */}
               <div className="relative">
                 <label className="block text-sm font-medium text-text mb-1">Customer *</label>
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-text-muted" />
-                  <input 
-                    type="text" 
-                    placeholder="Cari customer..." 
-                    value={customerSearch} 
-                    onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }} 
-                    className="flex-1 px-4 py-2 border border-border rounded-lg" 
-                  />
-                </div>
-                {showCustomerDropdown && filteredCustomers.length > 0 && (
-                  <div className="absolute z-10 w-full bg-surface border border-border rounded-lg mt-1 max-h-48 overflow-auto">
-                    {filteredCustomers.map(c => (
-                      <button 
-                        key={c.id} 
-                        className="w-full text-left px-4 py-2 hover:bg-background" 
-                        onClick={() => { 
-                          setFormData({ ...formData, customer_id: c.id, customer_name: c.name }); 
-                          setCustomerSearch(c.name); 
-                          setShowCustomerDropdown(false); 
-                        }}
-                      >
-                        {c.name} - {c.email}
-                      </button>
-                    ))}
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <input 
+                      type="text" 
+                      placeholder="Cari customer..." 
+                      value={customerSearch} 
+                      onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }} 
+                      className="w-full px-4 py-2 border border-border rounded-lg" 
+                    />
+                    {showCustomerDropdown && filteredCustomers.length > 0 && (
+                      <div className="absolute z-10 w-full bg-surface border border-border rounded-lg mt-1 max-h-48 overflow-auto">
+                        {filteredCustomers.map(c => (
+                          <button 
+                            key={c.id} 
+                            className="w-full text-left px-4 py-2 hover:bg-background" 
+                            onClick={() => { 
+                              setFormData({ ...formData, customer_id: c.id, customer_name: c.name }); 
+                              setCustomerSearch(c.name); 
+                              setShowCustomerDropdown(false); 
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
+                  <button 
+                    type="button"
+                    onClick={() => setShowNewCustomerModal(true)}
+                    className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5"
+                  >
+                    + Baru
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -658,16 +764,31 @@ export default function Invoices() {
                 </div>
               </div>
 
+              {/* Project Selection */}
               <div>
                 <label className="block text-sm font-medium text-text mb-1">Proyek (Opsional)</label>
-                <select value={formData.project_id || ''} onChange={(e) => setFormData({ ...formData, project_id: e.target.value ? parseInt(e.target.value) : null })} className="w-full px-4 py-2 border border-border rounded-lg">
-                  <option value="">-- Pilih Proyek --</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select 
+                    value={formData.project_id || ''} 
+                    onChange={(e) => setFormData({ ...formData, project_id: e.target.value ? parseInt(e.target.value) : null })} 
+                    className="flex-1 px-4 py-2 border border-border rounded-lg bg-surface"
+                  >
+                    <option value="">-- Tidak Ada Proyek --</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                    ))}
+                  </select>
+                  <button 
+                    type="button"
+                    onClick={() => setShowNewProjectModal(true)}
+                    className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5"
+                  >
+                    + Baru
+                  </button>
+                </div>
               </div>
 
+              {/* Items Table */}
               <div>
                 <label className="block text-sm font-medium text-text mb-1">Item</label>
                 <button onClick={addItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
@@ -744,105 +865,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Modal Edit Invoice */}
-      {showEditModal && selectedInvoice && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-display text-xl font-bold text-text">Edit Invoice - {selectedInvoice.invoice_number}</h2>
-              <button onClick={() => setShowEditModal(false)} className="text-gray-500 hover:text-gray-700">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-text mb-1">Tanggal Invoice</label>
-                  <input type="date" value={editForm.invoice_date} onChange={(e) => setEditForm({ ...editForm, invoice_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-text mb-1">Jatuh Tempo</label>
-                  <input type="date" value={editForm.due_date} onChange={(e) => setEditForm({ ...editForm, due_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-text mb-1">Item</label>
-                <button onClick={addEditItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <table className="w-full">
-                    <thead className="bg-background">
-                      <tr>
-                        <th className="px-2 py-2 text-left text-xs text-text-muted">Deskripsi</th>
-                        <th className="px-2 py-2 text-center text-xs text-text-muted w-20">Qty</th>
-                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Harga</th>
-                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Diskon</th>
-                        <th className="px-2 py-2 text-right text-xs text-text-muted w-32">Jumlah</th>
-                        <th className="w-10"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {editItems.map((item, idx) => (
-                        <tr key={idx}>
-                          <td className="px-2 py-2">
-                            <input type="text" placeholder="Deskripsi" value={item.description} onChange={(e) => handleEditItem(idx, 'description', e.target.value)} className="w-full px-2 py-1 border border-border rounded text-sm" />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input type="number" value={item.quantity} onChange={(e) => handleEditItem(idx, 'quantity', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input type="number" value={item.unit_price} onChange={(e) => handleEditItem(idx, 'unit_price', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
-                          </td>
-                          <td className="px-2 py-2">
-                            <input type="number" value={item.discount} onChange={(e) => handleEditItem(idx, 'discount', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border border-border rounded text-sm text-right" />
-                          </td>
-                          <td className="px-2 py-2 text-right text-sm font-mono">
-                            {formatCurrency(item.amount)}
-                          </td>
-                          <td className="px-2 py-2 text-center">
-                            <button onClick={() => removeEditItem(idx)}>
-                              <Trash2 className="w-4 h-4 text-danger" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-background">
-                      <tr>
-                        <td colSpan={4} className="px-2 py-2 text-right font-medium">Subtotal</td>
-                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(calculateEditTotals().subtotal)}</td>
-                        <td></td>
-                      </tr>
-                      <tr>
-                        <td colSpan={4} className="px-2 py-2 text-right font-medium">PPN {currentCompany?.id === 1 ? '11%' : '1.1%'}</td>
-                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(calculateEditTotals().ppn)}</td>
-                        <td></td>
-                      </tr>
-                      <tr className="font-bold">
-                        <td colSpan={4} className="px-2 py-2 text-right">TOTAL</td>
-                        <td className="px-2 py-2 text-right text-accent">{formatCurrency(calculateEditTotals().total)}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-text mb-1">Catatan</label>
-                <textarea rows={2} value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
-              <button onClick={handleSaveEdit} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Perubahan</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Modal Detail Invoice */}
       {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -890,17 +912,64 @@ export default function Invoices() {
               <div><p className="text-sm text-text-muted">Total Tagihan</p><p className="font-semibold">{formatCurrency(selectedInvoice.total)}</p></div>
               <div><p className="text-sm text-text-muted">Sudah Dibayar</p><p className="font-semibold text-success">{formatCurrency(selectedInvoice.paid_amount || 0)}</p></div>
               <div><p className="text-sm text-text-muted">Sisa Tagihan</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
-              <div><label className="block text-sm font-medium text-text mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" placeholder="Masukkan jumlah" /></div>
               <div><label className="block text-sm font-medium text-text mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium text-text mb-1">Metode Pembayaran</label><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg">
-                <option value="transfer">Transfer Bank</option>
-                <option value="cash">Tunai</option>
-                <option value="credit_card">Kartu Kredit</option>
-              </select></div>
+              <div><label className="block text-sm font-medium text-text mb-1">Metode Pembayaran</label>
+                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border border-border rounded-lg">
+                  <option value="transfer">Transfer Bank</option>
+                  <option value="cash">Tunai</option>
+                  <option value="credit_card">Kartu Kredit</option>
+                </select>
+              </div>
+              <div><label className="block text-sm font-medium text-text mb-1">Akun Bank / Kas</label>
+                <select value={selectedBankId} onChange={(e) => setSelectedBankId(parseInt(e.target.value))} className="w-full px-4 py-2 border border-border rounded-lg">
+                  <option value={0}>-- Pilih Akun --</option>
+                  {bankAccounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
               <button onClick={handleRecordPayment} className="px-4 py-2 bg-accent text-white rounded-lg">Catat Pembayaran</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Buat Customer Baru */}
+      {showNewCustomerModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold text-text mb-4">Tambah Customer Baru</h2>
+            <div className="space-y-3">
+              <input type="text" placeholder="Nama Customer *" value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
+              <input type="email" placeholder="Email" value={newCustomer.email} onChange={(e) => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
+              <input type="text" placeholder="Telepon" value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
+              <textarea placeholder="Alamat" rows={2} value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowNewCustomerModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={handleCreateCustomer} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Buat Proyek Baru */}
+      {showNewProjectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold text-text mb-4">Tambah Proyek Baru</h2>
+            <div className="space-y-3">
+              <input type="text" placeholder="Kode Proyek *" value={newProject.code} onChange={(e) => setNewProject({...newProject, code: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border border-border rounded-lg" />
+              <input type="text" placeholder="Nama Proyek *" value={newProject.name} onChange={(e) => setNewProject({...newProject, name: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
+              <input type="number" placeholder="Anggaran" value={newProject.budget || ''} onChange={(e) => setNewProject({...newProject, budget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border border-border rounded-lg" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowNewProjectModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={handleCreateProject} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
             </div>
           </div>
         </div>

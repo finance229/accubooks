@@ -20,6 +20,10 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Vendors from './pages/Vendors';
 import PurchaseInvoices from './pages/PurchaseInvoices';
+// TAMBAHKAN IMPORT INI
+import IncomeStatement from './pages/IncomeStatement';
+import BalanceSheet from './pages/BalanceSheet';
+import RecurringTransactions from './pages/RecurringTransactions';
 
 function App() {
   return (
@@ -50,7 +54,10 @@ function App() {
               <Route path="projects" element={<Projects />} />
               <Route path="vendors" element={<Vendors />} />
               <Route path="purchase-invoices" element={<PurchaseInvoices />} />
-
+              {/* TAMBAHKAN ROUTE INI */}
+              <Route path="income-statement" element={<IncomeStatement />} />
+              <Route path="balance-sheet" element={<BalanceSheet />} />
+              <Route path="recurring-transactions" element={<RecurringTransactions />} />
             </Route>
           </Routes>
         </CompanyProvider>

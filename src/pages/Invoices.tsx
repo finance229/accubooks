@@ -303,16 +303,17 @@ export default function Invoices() {
     setCustomerSearch('');
   };
 
-  const handleVerifyInvoice = async (invoice: Invoice) => {
-    try {
-      const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
-      const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
-      const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
-      
-      if (!receivableAcc || !revenueAcc) {
-        alert('Akun piutang atau pendapatan tidak ditemukan');
-        return;
-      }
+ const handleVerifyInvoice = async (invoice: Invoice) => {
+  try {
+    // Gunakan getDefaultAccount dengan company ID
+    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+    const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
+    const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
+    
+    if (!receivableAcc || !revenueAcc) {
+      alert(`Akun tidak ditemukan. Cek COA untuk company ${currentCompany?.name}`);
+      return;
+    }
 
       const entries = [
         { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },

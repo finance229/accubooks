@@ -163,33 +163,36 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
 // GET ALL ACCOUNTS BY TYPE
 // ============================================
 export const getBankAccounts = async (companyId: number) => {
-  const suffix = getCompanySuffix(companyId);
-  
-  // Query sederhana tanpa filter name
-  const { data, error } = await supabase
-    .from('coa')
-    .select('id, code, name')
-    .eq('company_id', companyId)
-    .eq('suffix', suffix)
-    .eq('is_active', true)
-    .in('type', ['asset']);
-  
-  if (error) {
-    console.error('Error fetching bank accounts:', error);
+  try {
+    const suffix = getCompanySuffix(companyId);
+    
+    const { data, error } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', companyId)
+      .eq('suffix', suffix)
+      .eq('is_active', true)
+      .eq('type', 'asset');
+    
+    if (error) {
+      console.error('Error getBankAccounts:', error);
+      return [];
+    }
+    
+    // Filter untuk akun bank (nama mengandung Bank atau Kas)
+    const bankAccounts = (data || []).filter(acc => 
+      acc.name.toLowerCase().includes('bank') || 
+      acc.name.toLowerCase().includes('kas')
+    );
+    
+    console.log('getBankAccounts result:', bankAccounts); // Debug
+    
+    return bankAccounts;
+  } catch (err) {
+    console.error('Error getBankAccounts:', err);
     return [];
   }
-  
-  // Filter manual untuk akun bank/kas
-  const bankAccounts = data?.filter(acc => 
-    acc.name.toLowerCase().includes('bank') || 
-    acc.name.toLowerCase().includes('kas')
-  ) || [];
-  
-  console.log('Bank accounts found:', bankAccounts); // Cek di console
-  
-  return bankAccounts;
-};
-export const getExpenseAccounts = async (companyId: number) => {
+};export const getExpenseAccounts = async (companyId: number) => {
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')

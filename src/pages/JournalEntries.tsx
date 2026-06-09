@@ -80,7 +80,6 @@ export default function JournalEntries() {
 
   const fetchCoa = async () => {
     if (!currentCompany?.id) return;
-    
     const { data } = await supabase
       .from('coa')
       .select('id, code, name')
@@ -270,25 +269,27 @@ export default function JournalEntries() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-8">Loading...</td></tr>
+                <tr>
+                  <td colSpan={7} className="text-center py-8">Loading...<\/td>
+                </tr>
               ) : (
                 filteredJournals.map((journal, index) => {
                   const totalDebit = journal.lines.reduce((sum, line) => sum + line.debit, 0);
                   return (
-                    <motion.tr key={journal.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 }} className="hover:bg-background transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap"><span className="text-sm font-mono font-semibold text-text">{journal.journal_number}</span></td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{journal.journal_date}</td>
+                    <tr key={journal.id} className="hover:bg-background transition-colors">
+                      <td className="px-6 py-4"><span className="text-sm font-mono font-semibold text-text">{journal.journal_number}</span></td>
+                      <td className="px-6 py-4 text-sm text-text">{journal.journal_date}</td>
                       <td className="px-6 py-4 text-sm text-text">{journal.description}</td>
                       <td className="px-6 py-4 text-sm text-text">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right"><span className="text-sm font-mono font-semibold text-text">{formatCurrency(totalDebit)}</span></td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <td className="px-6 py-4 text-right"><span className="text-sm font-mono font-semibold text-text">{formatCurrency(totalDebit)}</span></td>
+                      <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
+                      <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
                           {journal.status === 'draft' && <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>}
                         </div>
                       </td>
-                    </motion.tr>
+                    </tr>
                   );
                 })
               )}
@@ -308,15 +309,9 @@ export default function JournalEntries() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-text mb-1">Proyek (Opsional)</label>
-                <select 
-                  value={newJournal.project_id || ''} 
-                  onChange={(e) => setNewJournal({ ...newJournal, project_id: e.target.value ? parseInt(e.target.value) : null })}
-                  className="w-full px-4 py-2 border border-border rounded-lg"
-                >
+                <select value={newJournal.project_id || ''} onChange={(e) => setNewJournal({ ...newJournal, project_id: e.target.value ? parseInt(e.target.value) : null })} className="w-full px-4 py-2 border border-border rounded-lg">
                   <option value="">-- Tidak Ada Proyek --</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-                  ))}
+                  {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}
                 </select>
               </div>
               <div>
@@ -324,7 +319,7 @@ export default function JournalEntries() {
                 <div className="border border-border rounded-lg overflow-hidden">
                   <table className="w-full">
                     <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Kredit</th><th className="px-4 py-2 text-center w-10"></th></tr></thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody>
                       {newJournal.lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="px-4 py-2"><select value={line.coa_id || ''} onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))} className="w-full px-3 py-1.5 border border-border rounded-lg text-sm"><option value="">Pilih Akun</option>{coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></td>
@@ -348,14 +343,52 @@ export default function JournalEntries() {
       {showDetailModal && selectedJournal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4"><div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div><button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button></div>
-            <div className="grid grid-cols-2 gap-4 mb-4"><div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div><div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div></div>
-            <div className="border border-border rounded-lg overflow-hidden">
-              <table className="w-full"><thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th></tr></thead>
-              <tbody className="divide-y divide-border">{selectedJournal.lines.map((line, idx) => (<tr key={idx}><td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td><td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}</td><td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td></td>))}
-              <tr className="bg-background font-bold"><td className="px-4 py-2">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td></tr></tbody></table>
+            <div className="flex justify-between items-center mb-4">
+              <div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div>
+              <button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button>
             </div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>{selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}</div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div>
+              <div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div>
+            </div>
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-background">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th>
+                    <th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th>
+                    <th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {selectedJournal.lines.map((line, idx) => (
+                    <tr key={idx}>
+                      <td className="px-4 py-2">
+                        <p className="text-sm font-mono font-semibold">{line.account_code}</p>
+                        <p className="text-xs text-text-muted">{line.account_name}</p>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-background font-bold">
+                  <tr>
+                    <td className="px-4 py-2">TOTAL</td>
+                    <td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td>
+                    <td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
+              {selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}
+            </div>
           </div>
         </div>
       )}

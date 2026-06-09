@@ -585,15 +585,37 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-sm">{invoice.invoice_date}</td>
                     <td className="px-6 py-4 text-sm">{invoice.customer_name}</td>
                     <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(invoice.total)}</td
-                    <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>{getStatusLabel(invoice.status)}</span></td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
+                        {getStatusLabel(invoice.status)}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
-                        {invoice.status === 'draft' && <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>}
-                        {(invoice.status === 'draft' || invoice.status === 'sent') && <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><CheckCircle className="w-4 h-4" /></button>}
-                        {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
-                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
-                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><Send className="w-4 h-4" /></button>
+                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {invoice.status === 'draft' && (
+                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {(invoice.status === 'draft' || invoice.status === 'sent') && (
+                          <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {invoice.status !== 'paid' && (
+                          <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg">
+                            <DollarSign className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
+                          <Send className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>

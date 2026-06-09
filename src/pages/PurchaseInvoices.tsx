@@ -692,7 +692,7 @@ export default function PurchaseInvoices() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></td>
+                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
               ) : (
                 filteredInvoices.map((inv) => (
                   <tr key={inv.id} className="hover:bg-background">

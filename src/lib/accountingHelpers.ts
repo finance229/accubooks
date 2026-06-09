@@ -1,5 +1,9 @@
 import { supabase } from './supabase';
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
 // Format currency
 export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('id-ID', {
@@ -14,15 +18,25 @@ export const formatNumber = (amount: number) => {
   return new Intl.NumberFormat('id-ID').format(amount);
 };
 
-// Generate Voucher Code
-// Format: YYYY/MM/KODE_PROJECT/URUTAN (reset per bulan per project)
+// Mendapatkan suffix berdasarkan company_id
+export const getCompanySuffix = (companyId: number): string => {
+  const suffixMap: Record<number, string> = {
+    1: 'A',  // ARKO
+    2: 'B',  // MMC
+    3: 'C',  // USA
+  };
+  return suffixMap[companyId] || 'A';
+};
+
+// ============================================
+// GENERATE VOUCHER CODE
+// ============================================
 export const generateVoucherCode = async (companyId: number, projectCode: string, date: Date): Promise<string> => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const base = `${year}/${month}/${projectCode}`;
   
-  // Cari nomor urut terakhir untuk base ini di tabel payment_requests
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from('payment_requests')
     .select('voucher_no')
     .ilike('voucher_no', `${base}/%`)
@@ -40,7 +54,9 @@ export const generateVoucherCode = async (companyId: number, projectCode: string
   return `${base}/${nextNumber}`;
 };
 
-// Cek budget project
+// ============================================
+// BUDGET PROJECT
+// ============================================
 export const checkProjectBudget = async (projectId: number, amount: number) => {
   const { data: project, error } = await supabase
     .from('projects')
@@ -61,7 +77,6 @@ export const checkProjectBudget = async (projectId: number, amount: number) => {
   };
 };
 
-// Update spent project setelah verifikasi
 export const updateProjectSpent = async (projectId: number, amount: number) => {
   const { data: project } = await supabase
     .from('projects')
@@ -80,7 +95,140 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
   return !error;
 };
 
-// Buat jurnal accrual (saat verifikasi)
+// ============================================
+// GET DEFAULT ACCOUNTS
+// ============================================
+export const getDefaultAccount = async (companyId: number, type: string) => {
+  const suffix = getCompanySuffix(companyId);
+  
+  const mapping: Record<string, string> = {
+    // Aset
+    receivable: `1111-${suffix}`,      // Piutang Usaha
+    ppn_in: `1131-${suffix}`,          // PPN Masukan
+    cash: `1101-${suffix}`,            // Kas Kecil
+    
+    // Bank accounts
+    bank_mandiri: `1102-01-${suffix}`, // Bank Mandiri
+    bank_bca: `1102-02-${suffix}`,     // Bank BCA
+    bank_bri: `1102-03-${suffix}`,     // Bank BRI
+    bank_bsi: `1102-04-${suffix}`,     // Bank BSI
+    bank_bni: `1102-05-${suffix}`,     // Bank BNI
+    
+    // Liabilitas
+    payable: `2101-${suffix}`,         // Utang Usaha
+    ppn_out: `2103-01-${suffix}`,      // PPN Keluaran
+    pph21: `2103-02-${suffix}`,        // Utang PPh 21
+    pph23: `2103-03-${suffix}`,        // Utang PPh 23
+    pph25: `2103-04-${suffix}`,        // Utang PPh 25
+    
+    // Ekuitas
+    capital: `3101-${suffix}`,         // Modal Disetor
+    retained_earnings: `3102-${suffix}`, // Laba Ditahan
+    
+    // Pendapatan
+    revenue: `4101-${suffix}`,         // Pendapatan Jasa (ARKO) / Ekspedisi (MMC/USA)
+    revenue_other: `4102-${suffix}`,   // Pendapatan Lain-lain
+    
+    // Beban
+    expense_salary: `5101-${suffix}`,  // Beban Gaji
+    expense_rent: `5111-${suffix}`,    // Beban Sewa
+    expense_electricity: `5112-${suffix}`, // Beban Listrik
+    expense_depreciation: `5152-${suffix}`, // Beban Penyusutan
+  };
+  
+  const code = mapping[type];
+  if (!code) {
+    console.error(`Mapping untuk tipe "${type}" tidak ditemukan`);
+    return null;
+  }
+  
+  const { data, error } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', companyId)
+    .eq('code', code)
+    .single();
+  
+  if (error) {
+    console.error(`Akun ${type} (${code}) tidak ditemukan untuk company ${companyId}`);
+    return null;
+  }
+  return data;
+};
+
+// ============================================
+// GET ALL ACCOUNTS BY TYPE
+// ============================================
+export const getBankAccounts = async (companyId: number) => {
+  const suffix = getCompanySuffix(companyId);
+  const { data, error } = await supabase
+    .from('coa')
+    .select('id, code, name')
+    .eq('company_id', companyId)
+    .like('code', `1102-%${suffix}`)
+    .order('code');
+  
+  if (error) return [];
+  return data || [];
+};
+
+export const getExpenseAccounts = async (companyId: number) => {
+  const { data, error } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', companyId)
+    .in('type', ['expense', 'asset'])
+    .eq('is_active', true)
+    .order('code');
+  
+  if (error) return [];
+  return data || [];
+};
+
+export const getLiabilityAccounts = async (companyId: number) => {
+  const { data, error } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', companyId)
+    .eq('type', 'liability')
+    .eq('is_active', true)
+    .order('code');
+  
+  if (error) return [];
+  return data || [];
+};
+
+export const getAllAccounts = async (companyId: number) => {
+  const { data, error } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', companyId)
+    .eq('is_active', true)
+    .order('code');
+  
+  if (error) return [];
+  return data || [];
+};
+
+// ============================================
+// CREATE JOURNAL
+// ============================================
+// Helper: get next journal number
+async function getNextJournalNumber(companyId: number, year: number): Promise<number> {
+  const prefix = `JU-${year}-`;
+  const { data } = await supabase
+    .from('journals')
+    .select('journal_number')
+    .ilike('journal_number', `${prefix}%`)
+    .order('journal_number', { ascending: false })
+    .limit(1);
+  
+  if (!data || data.length === 0) return 1;
+  const lastNumber = parseInt(data[0].journal_number.replace(prefix, ''));
+  return isNaN(lastNumber) ? 1 : lastNumber + 1;
+}
+
+// Jurnal accrual (saat verifikasi)
 export const createAccrualJournal = async (
   companyId: number,
   date: string,
@@ -91,7 +239,6 @@ export const createAccrualJournal = async (
   amount: number,
   projectId?: number
 ) => {
-  // Dapatkan akun kode dari coa
   const { data: debitAcc } = await supabase
     .from('coa')
     .select('code, name')
@@ -105,12 +252,10 @@ export const createAccrualJournal = async (
   
   if (!debitAcc || !creditAcc) throw new Error('Akun tidak ditemukan');
   
-  // Generate journal number
   const year = new Date(date).getFullYear();
   const count = await getNextJournalNumber(companyId, year);
   const journalNumber = `JU-${year}-${String(count).padStart(4, '0')}`;
   
-  // Insert journal
   const { data: journal, error: jError } = await supabase
     .from('journals')
     .insert({
@@ -127,7 +272,6 @@ export const createAccrualJournal = async (
   
   if (jError) throw jError;
   
-  // Insert journal lines
   const lines = [
     { journal_id: journal.id, coa_id: debitAccountId, account_code: debitAcc.code, account_name: debitAcc.name, debit: amount, credit: 0 },
     { journal_id: journal.id, coa_id: creditAccountId, account_code: creditAcc.code, account_name: creditAcc.name, debit: 0, credit: amount }
@@ -139,14 +283,14 @@ export const createAccrualJournal = async (
   return journal.id;
 };
 
-// Buat jurnal pembayaran (saat approve)
+// Jurnal pembayaran (saat approve)
 export const createPaymentJournal = async (
   companyId: number,
   date: string,
   description: string,
   voucherNo: string,
-  liabilityAccountId: number, // akun hutang (credit_account dari verifikasi)
-  bankAccountId: number,      // akun kas/bank yang dipilih
+  liabilityAccountId: number,
+  bankAccountId: number,
   amount: number,
   projectId?: number
 ) => {
@@ -194,48 +338,7 @@ export const createPaymentJournal = async (
   return journal.id;
 };
 
-// Helper: get next journal number
-async function getNextJournalNumber(companyId: number, year: number): Promise<number> {
-  const prefix = `JU-${year}-`;
-  const { data, error } = await supabase
-    .from('journals')
-    .select('journal_number')
-    .ilike('journal_number', `${prefix}%`)
-    .order('journal_number', { ascending: false })
-    .limit(1);
-  
-  if (!data || data.length === 0) return 1;
-  const lastNumber = parseInt(data[0].journal_number.replace(prefix, ''));
-  return isNaN(lastNumber) ? 1 : lastNumber + 1;
-}
-
-// Log payment request activity
-export const addPaymentLog = async (requestId: number, oldStatus: string, newStatus: string, notes: string) => {
-  const { data: user } = await supabase.auth.getUser();
-  const email = user.user?.email || 'system';
-  
-  await supabase.from('payment_request_logs').insert({
-    request_id: requestId,
-    old_status: oldStatus,
-    new_status: newStatus,
-    changed_by: email,
-    notes: notes,
-  });
-};
-
-// Tambahkan di bagian bawah file accountingHelpers.ts
-
-/**
- * Membuat jurnal umum (untuk AR dan AP)
- * @param companyId ID perusahaan
- * @param date Tanggal jurnal
- * @param description Deskripsi jurnal
- * @param reference Nomor referensi (invoice_no, dll)
- * @param referenceType Tipe referensi ('INVOICE', 'AP', 'PR')
- * @param referenceId ID dari tabel referensi
- * @param entries Array jurnal entries (debit/credit)
- * @param projectId Optional project ID
- */
+// Jurnal umum (untuk AR, AP, dll)
 export const createGeneralJournal = async (
   companyId: number,
   date: string,
@@ -253,7 +356,6 @@ export const createGeneralJournal = async (
   projectId?: number
 ): Promise<number | null> => {
   try {
-    // Validasi debit = credit
     const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
     const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
     
@@ -261,7 +363,6 @@ export const createGeneralJournal = async (
       throw new Error(`Total Debit (${totalDebit}) != Total Kredit (${totalCredit})`);
     }
 
-    // Generate journal number
     const year = new Date(date).getFullYear();
     const prefix = `JU-${year}-`;
     const { data: lastJournal } = await supabase
@@ -278,7 +379,6 @@ export const createGeneralJournal = async (
     }
     const journalNumber = `${prefix}${String(sequence).padStart(4, '0')}`;
 
-    // Insert journal header
     const { data: journal, error: jError } = await supabase
       .from('journals')
       .insert({
@@ -299,7 +399,6 @@ export const createGeneralJournal = async (
 
     if (jError) throw jError;
 
-    // Insert journal lines
     const lines = entries.map(entry => ({
       journal_id: journal.id,
       coa_id: entry.account_id,
@@ -320,39 +419,25 @@ export const createGeneralJournal = async (
   }
 };
 
-/**
- * Mendapatkan akun default berdasarkan tipe
- * @param companyId ID perusahaan
- * @param type Tipe akun ('receivable', 'payable', 'ppn_out', 'ppn_in', 'pph23')
- */
-export const getDefaultAccount = async (companyId: number, type: string) => {
-  const suffix = companyId === 1 ? 'A' : companyId === 2 ? 'B' : companyId === 3 ? 'C' : 'D';
+// ============================================
+// LOG PAYMENT REQUEST ACTIVITY
+// ============================================
+export const addPaymentLog = async (requestId: number, oldStatus: string, newStatus: string, notes: string) => {
+  const { data: user } = await supabase.auth.getUser();
+  const email = user.user?.email || 'system';
   
-  const mapping: Record<string, string> = {
-    receivable: `1111-${suffix}`,   // Piutang Usaha
-    payable: `2101-${suffix}`,      // Hutang Usaha
-    ppn_out: `2103-${suffix}`,      // PPN Keluaran
-    ppn_in: `1112-${suffix}`,       // PPN Masukan
-    pph23: `2131-${suffix}`,        // Hutang PPh 23
-  };
-  
-  const code = mapping[type];
-  if (!code) return null;
-  
-  const { data, error } = await supabase
-    .from('coa')
-    .select('id, code, name, type')
-    .eq('company_id', companyId)
-    .eq('code', code)
-    .single();
-  
-  if (error) return null;
-  return data;
+  await supabase.from('payment_request_logs').insert({
+    request_id: requestId,
+    old_status: oldStatus,
+    new_status: newStatus,
+    changed_by: email,
+    notes: notes,
+  });
 };
 
-/**
- * Membuat customer baru (jika belum ada)
- */
+// ============================================
+// CREATE CUSTOMER / VENDOR / PROJECT
+// ============================================
 export const createCustomerIfNotExist = async (
   companyId: number,
   name: string,
@@ -360,7 +445,6 @@ export const createCustomerIfNotExist = async (
   phone?: string,
   address?: string
 ) => {
-  // Cek apakah sudah ada
   const { data: existing } = await supabase
     .from('contacts')
     .select('id')
@@ -371,7 +455,6 @@ export const createCustomerIfNotExist = async (
   
   if (existing) return existing.id;
   
-  // Buat baru
   const { data: newCustomer, error } = await supabase
     .from('contacts')
     .insert({
@@ -390,9 +473,6 @@ export const createCustomerIfNotExist = async (
   return newCustomer.id;
 };
 
-/**
- * Membuat vendor baru (jika belum ada)
- */
 export const createVendorIfNotExist = async (
   companyId: number,
   name: string,
@@ -403,7 +483,6 @@ export const createVendorIfNotExist = async (
   bank_name?: string,
   bank_account?: string
 ) => {
-  // Cek apakah sudah ada
   const { data: existing } = await supabase
     .from('vendors')
     .select('id')
@@ -413,7 +492,6 @@ export const createVendorIfNotExist = async (
   
   if (existing) return existing.id;
   
-  // Buat baru
   const { data: newVendor, error } = await supabase
     .from('vendors')
     .insert({
@@ -434,16 +512,12 @@ export const createVendorIfNotExist = async (
   return newVendor.id;
 };
 
-/**
- * Membuat proyek baru (jika belum ada)
- */
 export const createProjectIfNotExist = async (
   companyId: number,
   code: string,
   name: string,
   budget: number
 ) => {
-  // Cek apakah sudah ada
   const { data: existing } = await supabase
     .from('projects')
     .select('id')
@@ -453,7 +527,6 @@ export const createProjectIfNotExist = async (
   
   if (existing) return existing.id;
   
-  // Buat baru
   const { data: newProject, error } = await supabase
     .from('projects')
     .insert({

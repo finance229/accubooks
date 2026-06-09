@@ -19,6 +19,7 @@ type Journal = {
   journal_number: string;
   journal_date: string;
   description: string;
+  project_id: number | null;
   status: 'draft' | 'posted';
   posted_by: string | null;
   posted_at: string | null;
@@ -30,6 +31,7 @@ export default function JournalEntries() {
   const { user } = useAuth();
   const [journals, setJournals] = useState<Journal[]>([]);
   const [coaList, setCoaList] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -39,6 +41,7 @@ export default function JournalEntries() {
   const [newJournal, setNewJournal] = useState({
     journal_date: new Date().toISOString().split('T')[0],
     description: '',
+    project_id: null as number | null,
     lines: [{ coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }] as JournalLine[],
   });
 
@@ -46,6 +49,7 @@ export default function JournalEntries() {
     if (currentCompany?.id) {
       fetchJournals();
       fetchCoa();
+      fetchProjects();
     }
   }, [currentCompany]);
 
@@ -79,10 +83,20 @@ export default function JournalEntries() {
     
     const { data } = await supabase
       .from('coa')
-      .select('id, code, suffix, name')
+      .select('id, code, name')
       .eq('company_id', currentCompany.id)
       .eq('is_active', true);
     setCoaList(data || []);
+  };
+
+  const fetchProjects = async () => {
+    if (!currentCompany?.id) return;
+    const { data } = await supabase
+      .from('projects')
+      .select('id, code, name')
+      .eq('company_id', currentCompany.id)
+      .eq('status', 'active');
+    setProjects(data || []);
   };
 
   const handleAddJournal = async () => {
@@ -108,6 +122,7 @@ export default function JournalEntries() {
         journal_number: journalNumber,
         journal_date: newJournal.journal_date,
         description: newJournal.description,
+        project_id: newJournal.project_id,
         status: 'draft',
       }])
       .select();
@@ -141,6 +156,7 @@ export default function JournalEntries() {
     setNewJournal({
       journal_date: new Date().toISOString().split('T')[0],
       description: '',
+      project_id: null,
       lines: [{ coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }],
     });
   };
@@ -180,7 +196,7 @@ export default function JournalEntries() {
         newLines[index] = {
           ...newLines[index],
           coa_id: selectedCoa.id,
-          account_code: `${selectedCoa.code}${selectedCoa.suffix ? `-${selectedCoa.suffix}` : ''}`,
+          account_code: selectedCoa.code,
           account_name: selectedCoa.name,
         };
       }
@@ -246,6 +262,7 @@ export default function JournalEntries() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">No. Jurnal</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Deskripsi</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Proyek</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Total</th>
                 <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
@@ -253,7 +270,7 @@ export default function JournalEntries() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
+                <tr><td colSpan={7} className="text-center py-8">Loading...<\/td></tr>
               ) : (
                 filteredJournals.map((journal, index) => {
                   const totalDebit = journal.lines.reduce((sum, line) => sum + line.debit, 0);
@@ -262,6 +279,7 @@ export default function JournalEntries() {
                       <td className="px-6 py-4 whitespace-nowrap"><span className="text-sm font-mono font-semibold text-text">{journal.journal_number}</span></td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-text">{journal.journal_date}</td>
                       <td className="px-6 py-4 text-sm text-text">{journal.description}</td>
+                      <td className="px-6 py-4 text-sm text-text">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-right"><span className="text-sm font-mono font-semibold text-text">{formatCurrency(totalDebit)}</span></td>
                       <td className="px-6 py-4 whitespace-nowrap text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -289,6 +307,19 @@ export default function JournalEntries() {
                 <div><label className="block text-sm font-medium text-text mb-1">Deskripsi</label><input type="text" placeholder="Deskripsi jurnal" value={newJournal.description} onChange={(e) => setNewJournal({ ...newJournal, description: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
               </div>
               <div>
+                <label className="block text-sm font-medium text-text mb-1">Proyek (Opsional)</label>
+                <select 
+                  value={newJournal.project_id || ''} 
+                  onChange={(e) => setNewJournal({ ...newJournal, project_id: e.target.value ? parseInt(e.target.value) : null })}
+                  className="w-full px-4 py-2 border border-border rounded-lg"
+                >
+                  <option value="">-- Tidak Ada Proyek --</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <div className="flex justify-between items-center mb-3"><label className="block text-sm font-medium text-text">Detail Jurnal</label><button onClick={addLine} className="text-sm text-accent hover:bg-accent/10 px-3 py-1 rounded-lg">+ Tambah Baris</button></div>
                 <div className="border border-border rounded-lg overflow-hidden">
                   <table className="w-full">
@@ -296,7 +327,7 @@ export default function JournalEntries() {
                     <tbody className="divide-y divide-border">
                       {newJournal.lines.map((line, idx) => (
                         <tr key={idx}>
-                          <td className="px-4 py-2"><select value={line.coa_id || ''} onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))} className="w-full px-3 py-1.5 border border-border rounded-lg text-sm"><option value="">Pilih Akun</option>{coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code}{acc.suffix ? `-${acc.suffix}` : ''} - {acc.name}</option>))}</select></td>
+                          <td className="px-4 py-2"><select value={line.coa_id || ''} onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))} className="w-full px-3 py-1.5 border border-border rounded-lg text-sm"><option value="">Pilih Akun</option>{coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></td>
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.debit || ''} onChange={(e) => updateLine(idx, 'debit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.credit || ''} onChange={(e) => updateLine(idx, 'credit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2 text-center"><button onClick={() => removeLine(idx)} className="text-danger hover:bg-danger/10 p-1 rounded"><Trash2 className="w-4 h-4" /></button></td>
@@ -321,7 +352,7 @@ export default function JournalEntries() {
             <div className="grid grid-cols-2 gap-4 mb-4"><div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div><div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div></div>
             <div className="border border-border rounded-lg overflow-hidden">
               <table className="w-full"><thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th></tr></thead>
-              <tbody className="divide-y divide-border">{selectedJournal.lines.map((line, idx) => (<tr key={idx}><td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td><td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}</td><td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td></tr>))}
+              <tbody className="divide-y divide-border">{selectedJournal.lines.map((line, idx) => (<tr key={idx}><td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td><td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}</td><td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td></td>))}
               <tr className="bg-background font-bold"><td className="px-4 py-2">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td></tr></tbody></table>
             </div>
             <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>{selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}</div>

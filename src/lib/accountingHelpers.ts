@@ -164,7 +164,7 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
 // ============================================
 export const getBankAccounts = async (companyId: number) => {
   const suffix = getCompanySuffix(companyId);
-  // Cari akun dengan code yang mengandung bank dan suffix tertentu
+  // Cari akun dengan suffix yang sesuai dan nama mengandung 'Bank'
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name')
@@ -173,7 +173,10 @@ export const getBankAccounts = async (companyId: number) => {
     .ilike('name', '%Bank%')
     .order('code');
   
-  if (error) return [];
+  if (error) {
+    console.error('Error fetching bank accounts:', error);
+    return [];
+  }
   return data || [];
 };
 export const getExpenseAccounts = async (companyId: number) => {

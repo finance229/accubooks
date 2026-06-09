@@ -435,7 +435,7 @@ export default function PaymentRequests() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...<\/td></table>
+                <tr><td colSpan={6} className="text-center py-8">Loading...</td></table>
               ) : (
                 filteredRequests.map((req, idx) => {
                   const Icon = getStatusIcon(req.status);

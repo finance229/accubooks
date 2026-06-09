@@ -101,56 +101,59 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
 export const getDefaultAccount = async (companyId: number, type: string) => {
   const suffix = getCompanySuffix(companyId);
   
+  // Mapping kode akun (tanpa suffix)
   const mapping: Record<string, string> = {
     // Aset
-    receivable: `1111-${suffix}`,      // Piutang Usaha
-    ppn_in: `1131-${suffix}`,          // PPN Masukan
-    cash: `1101-${suffix}`,            // Kas Kecil
+    receivable: '1111',      // Piutang Usaha
+    ppn_in: '1131',          // PPN Masukan
+    cash: '1101',            // Kas Kecil
     
     // Bank accounts
-    bank_mandiri: `1102-01-${suffix}`, // Bank Mandiri
-    bank_bca: `1102-02-${suffix}`,     // Bank BCA
-    bank_bri: `1102-03-${suffix}`,     // Bank BRI
-    bank_bsi: `1102-04-${suffix}`,     // Bank BSI
-    bank_bni: `1102-05-${suffix}`,     // Bank BNI
+    bank_mandiri: '1102-01', // Bank Mandiri
+    bank_bca: '1102-02',     // Bank BCA
+    bank_bri: '1102-03',     // Bank BRI
+    bank_bsi: '1102-04',     // Bank BSI
+    bank_bni: '1102-05',     // Bank BNI
     
     // Liabilitas
-    payable: `2101-${suffix}`,         // Utang Usaha
-    ppn_out: `2103-01-${suffix}`,      // PPN Keluaran
-    pph21: `2103-02-${suffix}`,        // Utang PPh 21
-    pph23: `2103-03-${suffix}`,        // Utang PPh 23
-    pph25: `2103-04-${suffix}`,        // Utang PPh 25
+    payable: '2101',         // Utang Usaha
+    ppn_out: '2103-01',      // PPN Keluaran
+    pph21: '2103-02',        // Utang PPh 21
+    pph23: '2103-03',        // Utang PPh 23
+    pph25: '2103-04',        // Utang PPh 25
     
     // Ekuitas
-    capital: `3101-${suffix}`,         // Modal Disetor
-    retained_earnings: `3102-${suffix}`, // Laba Ditahan
+    capital: '3101',         // Modal Disetor
+    retained_earnings: '3102', // Laba Ditahan
     
     // Pendapatan
-    revenue: `4101-${suffix}`,         // Pendapatan Jasa (ARKO) / Ekspedisi (MMC/USA)
-    revenue_other: `4102-${suffix}`,   // Pendapatan Lain-lain
+    revenue: '4101',         // Pendapatan Jasa
+    revenue_other: '4102',   // Pendapatan Lain-lain
     
     // Beban
-    expense_salary: `5101-${suffix}`,  // Beban Gaji
-    expense_rent: `5111-${suffix}`,    // Beban Sewa
-    expense_electricity: `5112-${suffix}`, // Beban Listrik
-    expense_depreciation: `5152-${suffix}`, // Beban Penyusutan
+    expense_salary: '5101',  // Beban Gaji
+    expense_rent: '5111',    // Beban Sewa
+    expense_electricity: '5112', // Beban Listrik
+    expense_depreciation: '5152', // Beban Penyusutan
   };
   
-  const code = mapping[type];
-  if (!code) {
+  const baseCode = mapping[type];
+  if (!baseCode) {
     console.error(`Mapping untuk tipe "${type}" tidak ditemukan`);
     return null;
   }
   
+  // 🔴 PERUBAHAN: Cari berdasarkan code (tanpa suffix) DAN suffix
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')
     .eq('company_id', companyId)
-    .eq('code', code)
+    .eq('code', baseCode)
+    .eq('suffix', suffix)  // ← TAMBAHKAN INI!
     .single();
   
   if (error) {
-    console.error(`Akun ${type} (${code}) tidak ditemukan untuk company ${companyId}`);
+    console.error(`Akun ${type} (${baseCode}-${suffix}) tidak ditemukan untuk company ${companyId}`);
     return null;
   }
   return data;

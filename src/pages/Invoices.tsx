@@ -584,7 +584,7 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-sm font-mono font-semibold">{invoice.invoice_number}</td>
                     <td className="px-6 py-4 text-sm">{invoice.invoice_date}</td>
                     <td className="px-6 py-4 text-sm">{invoice.customer_name}</td>
-                    <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(invoice.total)}</td
+                    <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(invoice.total)}</td>
                     <td className="px-6 py-4 text-center">
                       <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(invoice.status)}`}>
                         {getStatusLabel(invoice.status)}

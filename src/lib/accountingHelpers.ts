@@ -164,12 +164,15 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
 // ============================================
 export const getBankAccounts = async (companyId: number) => {
   const suffix = getCompanySuffix(companyId);
-  // Cari akun dengan suffix yang sesuai dan nama mengandung 'Bank'
+  
+  // Cari semua akun dengan tipe 'asset' dan nama mengandung 'Bank' atau 'Kas'
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name')
     .eq('company_id', companyId)
     .eq('suffix', suffix)
+    .eq('is_active', true)
+    .in('type', ['asset'])
     .ilike('name', '%Bank%')
     .order('code');
   
@@ -177,6 +180,20 @@ export const getBankAccounts = async (companyId: number) => {
     console.error('Error fetching bank accounts:', error);
     return [];
   }
+  
+  // Jika tidak ada bank, coba ambil semua akun kas
+  if (!data || data.length === 0) {
+    const { data: kasData } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', companyId)
+      .eq('suffix', suffix)
+      .eq('is_active', true)
+      .ilike('name', '%Kas%')
+      .limit(5);
+    return kasData || [];
+  }
+  
   return data || [];
 };
 export const getExpenseAccounts = async (companyId: number) => {

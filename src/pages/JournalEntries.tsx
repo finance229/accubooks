@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
+import { formatCurrency } from '../lib/accountingHelpers';
 
 type JournalLine = {
   id?: number;
@@ -38,6 +39,7 @@ export default function JournalEntries() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedJournal, setSelectedJournal] = useState<Journal | null>(null);
+  const [editingJournal, setEditingJournal] = useState<Journal | null>(null);
   const [newJournal, setNewJournal] = useState({
     journal_date: new Date().toISOString().split('T')[0],
     description: '',
@@ -55,7 +57,6 @@ export default function JournalEntries() {
 
   const fetchJournals = async () => {
     if (!currentCompany?.id) return;
-    
     setLoading(true);
     const { data: journalsData } = await supabase
       .from('journals')
@@ -98,13 +99,9 @@ export default function JournalEntries() {
     setProjects(data || []);
   };
 
-  const handleAddJournal = async () => {
+  const handleSaveJournal = async () => {
     if (!newJournal.description || newJournal.lines.length === 0) return;
     if (!currentCompany?.id) return;
-
-    const year = new Date().getFullYear();
-    const count = journals.length + 1;
-    const journalNumber = `JU-${year}-${String(count).padStart(4, '0')}`;
 
     const totalDebit = newJournal.lines.reduce((sum, line) => sum + line.debit, 0);
     const totalCredit = newJournal.lines.reduce((sum, line) => sum + line.credit, 0);
@@ -114,50 +111,95 @@ export default function JournalEntries() {
       return;
     }
 
-    const { data: journalData, error: journalError } = await supabase
-      .from('journals')
-      .insert([{
-        company_id: currentCompany.id,
-        journal_number: journalNumber,
-        journal_date: newJournal.journal_date,
-        description: newJournal.description,
-        project_id: newJournal.project_id,
-        status: 'draft',
-      }])
-      .select();
+    const year = new Date().getFullYear();
+    
+    if (editingJournal) {
+      // UPDATE existing journal
+      const { error: journalError } = await supabase
+        .from('journals')
+        .update({
+          journal_date: newJournal.journal_date,
+          description: newJournal.description,
+          project_id: newJournal.project_id,
+        })
+        .eq('id', editingJournal.id);
 
-    if (journalError || !journalData) {
-      alert('Gagal menyimpan jurnal');
-      return;
-    }
+      if (journalError) {
+        alert('Gagal update jurnal: ' + journalError.message);
+        return;
+      }
 
-    const journalId = journalData[0].id;
-    const linesToInsert = newJournal.lines.map(line => ({
-      journal_id: journalId,
-      coa_id: line.coa_id,
-      account_code: line.account_code,
-      account_name: line.account_name,
-      debit: line.debit,
-      credit: line.credit,
-    }));
+      // Hapus lines lama
+      await supabase.from('journal_lines').delete().eq('journal_id', editingJournal.id);
 
-    const { error: linesError } = await supabase
-      .from('journal_lines')
-      .insert(linesToInsert);
+      // Insert lines baru
+      const linesToInsert = newJournal.lines.map(line => ({
+        journal_id: editingJournal.id,
+        coa_id: line.coa_id,
+        account_code: line.account_code,
+        account_name: line.account_name,
+        debit: line.debit,
+        credit: line.credit,
+      }));
 
-    if (linesError) {
-      alert('Gagal menyimpan detail jurnal');
-      return;
+      const { error: linesError } = await supabase
+        .from('journal_lines')
+        .insert(linesToInsert);
+
+      if (linesError) {
+        alert('Gagal update detail jurnal: ' + linesError.message);
+        return;
+      }
+
+      alert('Jurnal berhasil diupdate');
+    } else {
+      // CREATE new journal
+      const count = journals.length + 1;
+      const journalNumber = `JU-${year}-${String(count).padStart(4, '0')}`;
+
+      const { data: journalData, error: journalError } = await supabase
+        .from('journals')
+        .insert([{
+          company_id: currentCompany.id,
+          journal_number: journalNumber,
+          journal_date: newJournal.journal_date,
+          description: newJournal.description,
+          project_id: newJournal.project_id,
+          status: 'draft',
+        }])
+        .select();
+
+      if (journalError || !journalData) {
+        alert('Gagal menyimpan jurnal');
+        return;
+      }
+
+      const journalId = journalData[0].id;
+      const linesToInsert = newJournal.lines.map(line => ({
+        journal_id: journalId,
+        coa_id: line.coa_id,
+        account_code: line.account_code,
+        account_name: line.account_name,
+        debit: line.debit,
+        credit: line.credit,
+      }));
+
+      const { error: linesError } = await supabase
+        .from('journal_lines')
+        .insert(linesToInsert);
+
+      if (linesError) {
+        alert('Gagal menyimpan detail jurnal');
+        return;
+      }
+
+      alert('Jurnal berhasil disimpan');
     }
 
     fetchJournals();
     setShowAddModal(false);
-    setNewJournal({
-      journal_date: new Date().toISOString().split('T')[0],
-      description: '',
-      project_id: null,
-      lines: [{ coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }],
-    });
+    setEditingJournal(null);
+    resetForm();
   };
 
   const handlePostJournal = async (journal: Journal) => {
@@ -165,7 +207,12 @@ export default function JournalEntries() {
       .from('journals')
       .update({ status: 'posted', posted_by: user?.name || 'Admin', posted_at: new Date().toISOString() })
       .eq('id', journal.id);
-    if (!error) fetchJournals();
+    if (!error) {
+      alert('Jurnal berhasil diposting');
+      fetchJournals();
+    } else {
+      alert('Gagal posting jurnal');
+    }
   };
 
   const handleDeleteJournal = async (id: number) => {
@@ -175,6 +222,23 @@ export default function JournalEntries() {
       fetchJournals();
       setShowDetailModal(false);
     }
+  };
+
+  const handleEditJournal = (journal: Journal) => {
+    setEditingJournal(journal);
+    setNewJournal({
+      journal_date: journal.journal_date,
+      description: journal.description,
+      project_id: journal.project_id,
+      lines: journal.lines.map(line => ({
+        coa_id: line.coa_id,
+        account_code: line.account_code,
+        account_name: line.account_name,
+        debit: line.debit,
+        credit: line.credit,
+      })),
+    });
+    setShowAddModal(true);
   };
 
   const addLine = () => {
@@ -205,15 +269,21 @@ export default function JournalEntries() {
     setNewJournal({ ...newJournal, lines: newLines });
   };
 
+  const resetForm = () => {
+    setNewJournal({
+      journal_date: new Date().toISOString().split('T')[0],
+      description: '',
+      project_id: null,
+      lines: [{ coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }],
+    });
+    setEditingJournal(null);
+  };
+
   const filteredJournals = journals.filter(j => {
     const matchesSearch = j.journal_number.toLowerCase().includes(searchTerm.toLowerCase()) || j.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || j.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
-  };
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -221,9 +291,7 @@ export default function JournalEntries() {
 
   const stats = { total: journals.length, draft: journals.filter(j => j.status === 'draft').length, posted: journals.filter(j => j.status === 'posted').length };
 
-  if (!currentCompany) {
-    return <div className="flex justify-center py-12">Loading...</div>;
-  }
+  if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
   return (
     <div className="space-y-6">
@@ -232,7 +300,7 @@ export default function JournalEntries() {
           <h1 className="font-display text-3xl font-bold text-text">Jurnal Umum</h1>
           <p className="text-text-muted mt-1">Input dan kelola jurnal akuntansi dengan validasi debit/kredit</p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors shadow-lg shadow-accent/30">
+        <button onClick={() => { resetForm(); setShowAddModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
           <Plus className="w-5 h-5" strokeWidth={2} /> Buat Jurnal
         </button>
       </div>
@@ -269,24 +337,27 @@ export default function JournalEntries() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-8">Loading...</td>
-                </tr>
+                <tr><td colSpan={7} className="text-center py-8">Loading...</td></tr>
               ) : (
                 filteredJournals.map((journal, index) => {
                   const totalDebit = journal.lines.reduce((sum, line) => sum + line.debit, 0);
                   return (
                     <tr key={journal.id} className="hover:bg-background transition-colors">
-                      <td className="px-6 py-4"><span className="text-sm font-mono font-semibold text-text">{journal.journal_number}</span></td>
-                      <td className="px-6 py-4 text-sm text-text">{journal.journal_date}</td>
-                      <td className="px-6 py-4 text-sm text-text">{journal.description}</td>
-                      <td className="px-6 py-4 text-sm text-text">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
-                      <td className="px-6 py-4 text-right"><span className="text-sm font-mono font-semibold text-text">{formatCurrency(totalDebit)}</span></td>
+                      <td className="px-6 py-4 text-sm font-mono font-semibold">{journal.journal_number}</td>
+                      <td className="px-6 py-4 text-sm">{journal.journal_date}</td>
+                      <td className="px-6 py-4 text-sm">{journal.description}</td>
+                      <td className="px-6 py-4 text-sm">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
+                      <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td
                       <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
-                          {journal.status === 'draft' && <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>}
+                          {journal.status === 'draft' && (
+                            <>
+                              <button onClick={() => handleEditJournal(journal)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -294,14 +365,15 @@ export default function JournalEntries() {
                 })
               )}
             </tbody>
-          </table>
+          <table>
         </div>
       </motion.div>
 
+      {/* Modal Add/Edit Jurnal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
-            <h2 className="font-display text-xl font-bold text-text mb-4">Buat Jurnal Baru</h2>
+            <h2 className="font-display text-xl font-bold text-text mb-4">{editingJournal ? 'Edit Jurnal' : 'Buat Jurnal Baru'}</h2>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-text mb-1">Tanggal</label><input type="date" value={newJournal.journal_date} onChange={(e) => setNewJournal({ ...newJournal, journal_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
@@ -319,7 +391,7 @@ export default function JournalEntries() {
                 <div className="border border-border rounded-lg overflow-hidden">
                   <table className="w-full">
                     <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Kredit</th><th className="px-4 py-2 text-center w-10"></th></tr></thead>
-                    <tbody>
+                    <tbody className="divide-y divide-border">
                       {newJournal.lines.map((line, idx) => (
                         <tr key={idx}>
                           <td className="px-4 py-2"><select value={line.coa_id || ''} onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))} className="w-full px-3 py-1.5 border border-border rounded-lg text-sm"><option value="">Pilih Akun</option>{coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></td>
@@ -335,60 +407,35 @@ export default function JournalEntries() {
                 {newJournal.lines.reduce((s, l) => s + l.debit, 0) !== newJournal.lines.reduce((s, l) => s + l.credit, 0) && <p className="text-danger text-sm mt-2">⚠️ Total Debit harus sama dengan Total Kredit!</p>}
               </div>
             </div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button><button onClick={handleAddJournal} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan Jurnal</button></div>
+            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button><button onClick={handleSaveJournal} className="px-4 py-2 bg-accent text-white rounded-lg">{editingJournal ? 'Update Jurnal' : 'Simpan Jurnal'}</button></div>
           </div>
         </div>
       )}
 
+      {/* Modal Detail */}
       {showDetailModal && selectedJournal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div>
-              <button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div>
-              <div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div>
-            </div>
+            <div className="flex justify-between items-center mb-4"><div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div><button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button></div>
+            <div className="grid grid-cols-2 gap-4 mb-4"><div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div><div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div></div>
             <div className="border border-border rounded-lg overflow-hidden">
               <table className="w-full">
-                <thead className="bg-background">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th>
-                    <th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th>
-                    <th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th>
-                  </tr>
-                </thead>
+                <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th></tr></thead>
                 <tbody className="divide-y divide-border">
                   {selectedJournal.lines.map((line, idx) => (
                     <tr key={idx}>
-                      <td className="px-4 py-2">
-                        <p className="text-sm font-mono font-semibold">{line.account_code}</p>
-                        <p className="text-xs text-text-muted">{line.account_name}</p>
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        {line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        {line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}
-                      </td>
-                    </tr>
+                      <td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td>
+                      <td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>} </td
+                      <td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td>
+                    </table>
                   ))}
                 </tbody>
                 <tfoot className="bg-background font-bold">
-                  <tr>
-                    <td className="px-4 py-2">TOTAL</td>
-                    <td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td>
-                    <td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td>
-                  </tr>
+                  <tr><td className="px-4 py-2">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td></tr>
                 </tfoot>
               </table>
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
-              {selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}
-            </div>
+            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>{selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}</div>
           </div>
         </div>
       )}

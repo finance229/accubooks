@@ -41,98 +41,72 @@ export default function BalanceSheet() {
     }
   }, [currentCompany, asOfDate]);
 
-  const fetchBalanceSheet = async () => {
-    if (!currentCompany?.id) return;
-    setLoading(true);
+const fetchBalanceSheet = async () => {
+  if (!currentCompany?.id) return;
+  setLoading(true);
 
-    try {
-      const { data: coaData } = await supabase
-        .from('coa')
-        .select('id, code, name, type')
-        .eq('company_id', currentCompany.id)
-        .in('type', ['asset', 'liability', 'equity']);
+  try {
+    // Ambil data dari view balance_sheet
+    const { data, error } = await supabase
+      .from('balance_sheet')
+      .select('*')
+      .eq('company_id', currentCompany.id);
 
-      if (!coaData || coaData.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const { data: journals } = await supabase
-        .from('journals')
-        .select('id, journal_date')
-        .eq('company_id', currentCompany.id)
-        .eq('status', 'posted')
-        .lte('journal_date', asOfDate);
-
-      if (!journals || journals.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const journalIds = journals.map(j => j.id);
-
-      const { data: journalLines } = await supabase
-        .from('journal_lines')
-        .select('account_id, debit, credit')
-        .in('journal_id', journalIds)
-        .in('account_id', coaData.map(c => c.id));
-
-      const accountBalances = new Map<number, number>();
-      coaData.forEach(acc => accountBalances.set(acc.id, 0));
-      
-      journalLines?.forEach(line => {
-        const currentBalance = accountBalances.get(line.account_id) || 0;
-        const coa = coaData.find(c => c.id === line.account_id);
-        if (coa?.type === 'asset') {
-          accountBalances.set(line.account_id, currentBalance + (line.debit - line.credit));
-        } else if (coa?.type === 'liability') {
-          accountBalances.set(line.account_id, currentBalance + (line.credit - line.debit));
-        } else if (coa?.type === 'equity') {
-          accountBalances.set(line.account_id, currentBalance + (line.credit - line.debit));
-        }
-      });
-
-      let totalAssets = 0;
-      let totalLiabilities = 0;
-      let totalEquity = 0;
-      const assetsList: AccountBalance[] = [];
-      const liabilitiesList: AccountBalance[] = [];
-      const equityList: AccountBalance[] = [];
-
-      coaData.forEach(acc => {
-        const balance = accountBalances.get(acc.id) || 0;
-        if (balance !== 0) {
-          if (acc.type === 'asset') {
-            totalAssets += balance;
-            assetsList.push({ ...acc, balance, type: acc.type });
-          } else if (acc.type === 'liability') {
-            totalLiabilities += balance;
-            liabilitiesList.push({ ...acc, balance, type: acc.type });
-          } else if (acc.type === 'equity') {
-            totalEquity += balance;
-            equityList.push({ ...acc, balance, type: acc.type });
-          }
-        }
-      });
-
-      assetsList.sort((a, b) => b.balance - a.balance);
-      liabilitiesList.sort((a, b) => b.balance - a.balance);
-      equityList.sort((a, b) => b.balance - a.balance);
-
-      setData({
-        assets: assetsList,
-        liabilities: liabilitiesList,
-        equity: equityList,
-        totalAssets,
-        totalLiabilities,
-        totalEquity,
-      });
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
+    if (error) {
+      console.error('Error fetching balance sheet:', error);
       setLoading(false);
+      return;
     }
-  };
+
+    console.log('Balance sheet data:', data);
+
+    if (!data || data.length === 0) {
+      setLoading(false);
+      return;
+    }
+
+    const assetsList = data
+      .filter(item => item.account_type === 'asset' && item.balance !== 0)
+      .map(item => ({
+        account_code: item.account_code,
+        account_name: item.account_name,
+        balance: item.balance,
+      }));
+
+    const liabilitiesList = data
+      .filter(item => item.account_type === 'liability' && item.balance !== 0)
+      .map(item => ({
+        account_code: item.account_code,
+        account_name: item.account_name,
+        balance: item.balance,
+      }));
+
+    const equityList = data
+      .filter(item => item.account_type === 'equity' && item.balance !== 0)
+      .map(item => ({
+        account_code: item.account_code,
+        account_name: item.account_name,
+        balance: item.balance,
+      }));
+
+    const totalAssets = assetsList.reduce((sum, a) => sum + a.balance, 0);
+    const totalLiabilities = liabilitiesList.reduce((sum, l) => sum + l.balance, 0);
+    const totalEquity = equityList.reduce((sum, e) => sum + e.balance, 0);
+
+    setData({
+      assets: assetsList,
+      liabilities: liabilitiesList,
+      equity: equityList,
+      totalAssets,
+      totalLiabilities,
+      totalEquity,
+    });
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {

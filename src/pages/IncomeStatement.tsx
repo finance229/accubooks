@@ -45,90 +45,63 @@ export default function IncomeStatement() {
     }
   }, [currentCompany, startDate, endDate]);
 
-  const fetchIncomeStatement = async () => {
-    if (!currentCompany?.id) return;
-    setLoading(true);
+ const fetchIncomeStatement = async () => {
+  if (!currentCompany?.id) return;
+  setLoading(true);
 
-    try {
-      const { data: coaData } = await supabase
-        .from('coa')
-        .select('id, code, name, type')
-        .eq('company_id', currentCompany.id)
-        .in('type', ['revenue', 'expense']);
+  try {
+    // Ambil data dari view income_statement
+    const { data, error } = await supabase
+      .from('income_statement')
+      .select('*')
+      .eq('company_id', currentCompany.id);
 
-      if (!coaData || coaData.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const { data: journals } = await supabase
-        .from('journals')
-        .select('id, journal_date')
-        .eq('company_id', currentCompany.id)
-        .eq('status', 'posted')
-        .gte('journal_date', startDate)
-        .lte('journal_date', endDate);
-
-      if (!journals || journals.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const journalIds = journals.map(j => j.id);
-
-      const { data: journalLines } = await supabase
-        .from('journal_lines')
-        .select('account_id, debit, credit')
-        .in('journal_id', journalIds)
-        .in('account_id', coaData.map(c => c.id));
-
-      const accountBalances = new Map<number, number>();
-      coaData.forEach(acc => accountBalances.set(acc.id, 0));
-      
-      journalLines?.forEach(line => {
-        const currentBalance = accountBalances.get(line.account_id) || 0;
-        const coa = coaData.find(c => c.id === line.account_id);
-        if (coa?.type === 'revenue') {
-          accountBalances.set(line.account_id, currentBalance + (line.credit - line.debit));
-        } else if (coa?.type === 'expense') {
-          accountBalances.set(line.account_id, currentBalance + (line.debit - line.credit));
-        }
-      });
-
-      let totalRevenue = 0;
-      let totalExpenses = 0;
-      const revenueList: AccountBalance[] = [];
-      const expensesList: AccountBalance[] = [];
-
-      coaData.forEach(acc => {
-        const balance = accountBalances.get(acc.id) || 0;
-        if (balance !== 0) {
-          if (acc.type === 'revenue') {
-            totalRevenue += balance;
-            revenueList.push({ ...acc, balance, type: acc.type });
-          } else if (acc.type === 'expense') {
-            totalExpenses += balance;
-            expensesList.push({ ...acc, balance, type: acc.type });
-          }
-        }
-      });
-
-      revenueList.sort((a, b) => b.balance - a.balance);
-      expensesList.sort((a, b) => b.balance - a.balance);
-
-      setData({
-        revenue: revenueList,
-        expenses: expensesList,
-        totalRevenue,
-        totalExpenses,
-        netIncome: totalRevenue - totalExpenses,
-      });
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
+    if (error) {
+      console.error('Error fetching income statement:', error);
       setLoading(false);
+      return;
     }
-  };
+
+    console.log('Income statement data:', data);
+
+    if (!data || data.length === 0) {
+      console.log('Tidak ada data');
+      setLoading(false);
+      return;
+    }
+
+    const revenueList = data
+      .filter(item => item.account_type === 'revenue' && item.balance !== 0)
+      .map(item => ({
+        account_code: item.account_code,
+        account_name: item.account_name,
+        balance: item.balance,
+      }));
+
+    const expensesList = data
+      .filter(item => item.account_type === 'expense' && item.balance !== 0)
+      .map(item => ({
+        account_code: item.account_code,
+        account_name: item.account_name,
+        balance: item.balance,
+      }));
+
+    const totalRevenue = revenueList.reduce((sum, r) => sum + r.balance, 0);
+    const totalExpenses = expensesList.reduce((sum, e) => sum + e.balance, 0);
+
+    setData({
+      revenue: revenueList,
+      expenses: expensesList,
+      totalRevenue,
+      totalExpenses,
+      netIncome: totalRevenue - totalExpenses,
+    });
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {

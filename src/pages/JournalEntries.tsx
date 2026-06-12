@@ -442,7 +442,7 @@ export default function JournalEntries() {
                             </button>
                           )}
                         </div>
-                       </td
+                       </td>
                      </tr>
                   );
                 })

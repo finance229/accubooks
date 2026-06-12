@@ -339,8 +339,8 @@ export default function Ledger() {
                     <tr>
                       <td colSpan={6} className="text-center py-12 text-text-muted">
                         Tidak ada transaksi untuk periode ini
-                       </td
-                     </tr
+                       </td>
+                     </tr>
                   ) : (
                     ledgerData.map((item, index) => (
                       <motion.tr

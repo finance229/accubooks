@@ -409,7 +409,7 @@ export default function JournalEntries() {
                       <td className="px-6 py-4 text-sm">{journal.journal_date}</td>
                       <td className="px-6 py-4 text-sm">{journal.description}</td>
                       <td className="px-6 py-4 text-sm">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td
-                      <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td
+                      <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td>
                       <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">

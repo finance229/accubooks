@@ -365,7 +365,7 @@ export default function JournalEntries() {
                 })
               )}
             </tbody>
-          <table>
+          </table>
         </div>
       </motion.div>
 

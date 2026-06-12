@@ -481,7 +481,7 @@ export default function JournalEntries() {
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.debit || ''} onChange={(e) => updateLine(idx, 'debit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.credit || ''} onChange={(e) => updateLine(idx, 'credit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2 text-center"><button onClick={() => removeLine(idx)} className="text-danger hover:bg-danger/10 p-1 rounded"><Trash2 className="w-4 h-4" /></button></td>
-                        </td>
+                        </tr>
                       ))}
                     </tbody>
                     <tfoot className="bg-background"><tr className="border-t border-border font-semibold"><td className="px-4 py-2 text-right">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.credit, 0))}</td><td></td></tr></tfoot>

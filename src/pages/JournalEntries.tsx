@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,6 +40,9 @@ export default function JournalEntries() {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedJournal, setSelectedJournal] = useState<Journal | null>(null);
   const [editingJournal, setEditingJournal] = useState<Journal | null>(null);
+  const [showUnpostModal, setShowUnpostModal] = useState(false);
+  const [unpostReason, setUnpostReason] = useState('');
+  const [unpostTargetId, setUnpostTargetId] = useState<number | null>(null);
   const [newJournal, setNewJournal] = useState({
     journal_date: new Date().toISOString().split('T')[0],
     description: '',
@@ -100,14 +103,22 @@ export default function JournalEntries() {
   };
 
   const handleSaveJournal = async () => {
-    if (!newJournal.description || newJournal.lines.length === 0) return;
+    // Validasi
+    if (!newJournal.description) {
+      alert('Deskripsi jurnal wajib diisi');
+      return;
+    }
+    if (newJournal.lines.length === 0) {
+      alert('Minimal 1 baris jurnal');
+      return;
+    }
     if (!currentCompany?.id) return;
 
-    const totalDebit = newJournal.lines.reduce((sum, line) => sum + line.debit, 0);
-    const totalCredit = newJournal.lines.reduce((sum, line) => sum + line.credit, 0);
+    const totalDebit = newJournal.lines.reduce((sum, line) => sum + (line.debit || 0), 0);
+    const totalCredit = newJournal.lines.reduce((sum, line) => sum + (line.credit || 0), 0);
     
     if (totalDebit !== totalCredit) {
-      alert('Total Debit harus sama dengan Total Kredit!');
+      alert(`Total Debit (${formatCurrency(totalDebit)}) harus sama dengan Total Kredit (${formatCurrency(totalCredit)})`);
       return;
     }
 
@@ -138,8 +149,8 @@ export default function JournalEntries() {
         coa_id: line.coa_id,
         account_code: line.account_code,
         account_name: line.account_name,
-        debit: line.debit,
-        credit: line.credit,
+        debit: line.debit || 0,
+        credit: line.credit || 0,
       }));
 
       const { error: linesError } = await supabase
@@ -154,8 +165,19 @@ export default function JournalEntries() {
       alert('Jurnal berhasil diupdate');
     } else {
       // CREATE new journal
-      const count = journals.length + 1;
-      const journalNumber = `JU-${year}-${String(count).padStart(4, '0')}`;
+      const { data: lastJournal } = await supabase
+        .from('journals')
+        .select('journal_number')
+        .like('journal_number', `JU-${year}-%`)
+        .order('id', { ascending: false })
+        .limit(1);
+      
+      let sequence = 1;
+      if (lastJournal && lastJournal.length > 0) {
+        const lastNumber = parseInt(lastJournal[0].journal_number.split('-').pop() || '0');
+        sequence = lastNumber + 1;
+      }
+      const journalNumber = `JU-${year}-${String(sequence).padStart(4, '0')}`;
 
       const { data: journalData, error: journalError } = await supabase
         .from('journals')
@@ -170,7 +192,7 @@ export default function JournalEntries() {
         .select();
 
       if (journalError || !journalData) {
-        alert('Gagal menyimpan jurnal');
+        alert('Gagal menyimpan jurnal: ' + journalError?.message);
         return;
       }
 
@@ -180,8 +202,8 @@ export default function JournalEntries() {
         coa_id: line.coa_id,
         account_code: line.account_code,
         account_name: line.account_name,
-        debit: line.debit,
-        credit: line.credit,
+        debit: line.debit || 0,
+        credit: line.credit || 0,
       }));
 
       const { error: linesError } = await supabase
@@ -189,7 +211,7 @@ export default function JournalEntries() {
         .insert(linesToInsert);
 
       if (linesError) {
-        alert('Gagal menyimpan detail jurnal');
+        alert('Gagal menyimpan detail jurnal: ' + linesError.message);
         return;
       }
 
@@ -205,18 +227,47 @@ export default function JournalEntries() {
   const handlePostJournal = async (journal: Journal) => {
     const { error } = await supabase
       .from('journals')
-      .update({ status: 'posted', posted_by: user?.name || 'Admin', posted_at: new Date().toISOString() })
+      .update({ 
+        status: 'posted', 
+        posted_by: user?.email || user?.name || 'Admin', 
+        posted_at: new Date().toISOString() 
+      })
       .eq('id', journal.id);
     if (!error) {
       alert('Jurnal berhasil diposting');
       fetchJournals();
     } else {
-      alert('Gagal posting jurnal');
+      alert('Gagal posting jurnal: ' + error.message);
+    }
+  };
+
+  const handleUnpostJournal = async (id: number, reason?: string) => {
+    try {
+      const { error } = await supabase
+        .from('journals')
+        .update({ 
+          status: 'draft',
+          posted_by: null,
+          posted_at: null,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      console.log(`Journal ${id} unposted by ${user?.email}${reason ? `, reason: ${reason}` : ''}`);
+      alert('Jurnal berhasil diunpost. Status berubah menjadi DRAFT dan bisa diedit kembali.');
+      fetchJournals();
+      setShowUnpostModal(false);
+      setUnpostReason('');
+      setUnpostTargetId(null);
+    } catch (error) {
+      console.error('Error unposting journal:', error);
+      alert('Gagal mengunpost jurnal');
     }
   };
 
   const handleDeleteJournal = async (id: number) => {
-    if (confirm('Yakin ingin menghapus jurnal ini?')) {
+    if (confirm('Yakin ingin menghapus jurnal ini? Tindakan ini tidak dapat dibatalkan.')) {
       await supabase.from('journal_lines').delete().eq('journal_id', id);
       await supabase.from('journals').delete().eq('id', id);
       fetchJournals();
@@ -242,12 +293,18 @@ export default function JournalEntries() {
   };
 
   const addLine = () => {
-    setNewJournal({ ...newJournal, lines: [...newJournal.lines, { coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }] });
+    setNewJournal({ 
+      ...newJournal, 
+      lines: [...newJournal.lines, { coa_id: 0, account_code: '', account_name: '', debit: 0, credit: 0 }] 
+    });
   };
 
   const removeLine = (index: number) => {
     if (newJournal.lines.length > 1) {
-      setNewJournal({ ...newJournal, lines: newJournal.lines.filter((_, i) => i !== index) });
+      setNewJournal({ 
+        ...newJournal, 
+        lines: newJournal.lines.filter((_, i) => i !== index) 
+      });
     }
   };
 
@@ -280,7 +337,8 @@ export default function JournalEntries() {
   };
 
   const filteredJournals = journals.filter(j => {
-    const matchesSearch = j.journal_number.toLowerCase().includes(searchTerm.toLowerCase()) || j.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = j.journal_number.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         j.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || j.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -289,7 +347,11 @@ export default function JournalEntries() {
     return new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   };
 
-  const stats = { total: journals.length, draft: journals.filter(j => j.status === 'draft').length, posted: journals.filter(j => j.status === 'posted').length };
+  const stats = { 
+    total: journals.length, 
+    draft: journals.filter(j => j.status === 'draft').length, 
+    posted: journals.filter(j => j.status === 'posted').length 
+  };
 
   if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
@@ -339,28 +401,49 @@ export default function JournalEntries() {
               {loading ? (
                 <tr><td colSpan={7} className="text-center py-8">Loading...</td></tr>
               ) : (
-                filteredJournals.map((journal, index) => {
+                filteredJournals.map((journal) => {
                   const totalDebit = journal.lines.reduce((sum, line) => sum + line.debit, 0);
                   return (
                     <tr key={journal.id} className="hover:bg-background transition-colors">
                       <td className="px-6 py-4 text-sm font-mono font-semibold">{journal.journal_number}</td>
                       <td className="px-6 py-4 text-sm">{journal.journal_date}</td>
                       <td className="px-6 py-4 text-sm">{journal.description}</td>
-                      <td className="px-6 py-4 text-sm">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
-                      <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td>
+                      <td className="px-6 py-4 text-sm">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td
+                      <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td
                       <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
+                          <button onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
+                            <Eye className="w-4 h-4" />
+                          </button>
                           {journal.status === 'draft' && (
                             <>
-                              <button onClick={() => handleEditJournal(journal)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit2 className="w-4 h-4" /></button>
-                              <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                              <button onClick={() => handleEditJournal(journal)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handlePostJournal(journal)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Post">
+                                <Send className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg" title="Hapus">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </>
                           )}
+                          {journal.status === 'posted' && (
+                            <button 
+                              onClick={() => {
+                                setUnpostTargetId(journal.id);
+                                setShowUnpostModal(true);
+                              }} 
+                              className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" 
+                              title="Unpost (Kembalikan ke Draft)"
+                            >
+                              <Undo2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
-                      </td>
-                    </tr>
+                       </td
+                     </tr>
                   );
                 })
               )}
@@ -398,7 +481,7 @@ export default function JournalEntries() {
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.debit || ''} onChange={(e) => updateLine(idx, 'debit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2"><input type="number" placeholder="0" value={line.credit || ''} onChange={(e) => updateLine(idx, 'credit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
                           <td className="px-4 py-2 text-center"><button onClick={() => removeLine(idx)} className="text-danger hover:bg-danger/10 p-1 rounded"><Trash2 className="w-4 h-4" /></button></td>
-                        </tr>
+                        </td>
                       ))}
                     </tbody>
                     <tfoot className="bg-background"><tr className="border-t border-border font-semibold"><td className="px-4 py-2 text-right">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.credit, 0))}</td><td></td></tr></tfoot>
@@ -412,12 +495,45 @@ export default function JournalEntries() {
         </div>
       )}
 
+      {/* Modal Unpost */}
+      {showUnpostModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold text-text mb-4">Unpost Jurnal</h2>
+            <p className="text-sm text-text-muted mb-4">
+              Apakah Anda yakin ingin membatalkan posting jurnal ini?<br/>
+              Jurnal akan kembali ke status DRAFT dan bisa diedit.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text mb-1">Alasan (Opsional)</label>
+              <textarea 
+                rows={2} 
+                value={unpostReason} 
+                onChange={(e) => setUnpostReason(e.target.value)}
+                placeholder="Misal: Kesalahan input, perlu penyesuaian, dll..."
+                className="w-full px-4 py-2 border border-border rounded-lg"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowUnpostModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
+              <button onClick={() => handleUnpostJournal(unpostTargetId!, unpostReason)} className="px-4 py-2 bg-warning text-white rounded-lg">Konfirmasi Unpost</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Detail */}
       {showDetailModal && selectedJournal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4"><div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div><button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button></div>
-            <div className="grid grid-cols-2 gap-4 mb-4"><div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div><div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div></div>
+            <div className="flex justify-between items-center mb-4">
+              <div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div>
+              <button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div>
+              <div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div>
+            </div>
             <div className="border border-border rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th></tr></thead>
@@ -435,7 +551,10 @@ export default function JournalEntries() {
                 </tfoot>
               </table>
             </div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>{selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}</div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
+              {selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}
+            </div>
           </div>
         </div>
       )}

@@ -425,9 +425,9 @@ export default function JournalEntries() {
                   {selectedJournal.lines.map((line, idx) => (
                     <tr key={idx}>
                       <td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td>
-                      <td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>} </td>
+                      <td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}</td>
                       <td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td>
-                    </table>
+                    </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-background font-bold">

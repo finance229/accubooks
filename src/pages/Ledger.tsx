@@ -67,51 +67,87 @@ export default function Ledger() {
     setLoading(false);
   };
 
-  const fetchLedgerData = async () => {
-    if (!selectedAccount || !currentCompany?.id) return;
-    
-    setLoading(true);
-    
-    // Ambil semua jurnal lines untuk akun yang dipilih
+ const fetchLedgerData = async () => {
+  if (!selectedAccount || !currentCompany?.id) return;
+  
+  setLoading(true);
+  
+  try {
+    // Ambil semua jurnal lines untuk akun yang dipilih (dengan join manual)
     const { data: journalLines, error } = await supabase
       .from('journal_lines')
       .select(`
         id,
         debit,
         credit,
-        journals!inner (
-          journal_number,
-          journal_date,
-          description,
-          status
-        )
+        journal_id
       `)
-      .eq('coa_id', selectedAccount.id)
-      .gte('journals.journal_date', startDate)
-      .lte('journals.journal_date', endDate)
-      .eq('journals.status', 'posted')
-      .order('journals.journal_date', { ascending: true });
+      .eq('coa_id', selectedAccount.id);
 
     if (error) {
-      console.error('Error fetching ledger:', error);
+      console.error('Error fetching journal lines:', error);
       setLedgerData([]);
       setLoading(false);
       return;
     }
 
+    if (!journalLines || journalLines.length === 0) {
+      console.log('Tidak ada journal lines untuk akun ini');
+      setLedgerData([]);
+      setLoading(false);
+      return;
+    }
+
+    // Ambil data journals berdasarkan journal_id yang ada
+    const journalIds = journalLines.map(jl => jl.journal_id);
+    const { data: journals, error: journalsError } = await supabase
+      .from('journals')
+      .select('id, journal_number, journal_date, description, status')
+      .in('id', journalIds)
+      .eq('status', 'posted')
+      .gte('journal_date', startDate)
+      .lte('journal_date', endDate)
+      .order('journal_date', { ascending: true });
+
+    if (journalsError) {
+      console.error('Error fetching journals:', journalsError);
+      setLedgerData([]);
+      setLoading(false);
+      return;
+    }
+
+    console.log('Journals found:', journals?.length);
+    console.log('Journal lines found:', journalLines?.length);
+
+    // Buat map journal untuk akses cepat
+    const journalMap = new Map();
+    journals?.forEach(j => {
+      journalMap.set(j.id, j);
+    });
+
     // Hitung saldo awal (sebelum periode)
     const { data: openingLines } = await supabase
       .from('journal_lines')
-      .select('debit, credit')
-      .eq('coa_id', selectedAccount.id)
-      .lt('journals.journal_date', startDate)
-      .eq('journals.status', 'posted');
+      .select('debit, credit, journal_id')
+      .eq('coa_id', selectedAccount.id);
 
     let openingBalance = 0;
     if (openingLines && openingLines.length > 0) {
-      openingBalance = openingLines.reduce((sum, line) => {
-        return sum + (line.debit - line.credit);
-      }, 0);
+      // Ambil journals untuk opening balance
+      const openingJournalIds = [...new Set(openingLines.map(jl => jl.journal_id))];
+      const { data: openingJournals } = await supabase
+        .from('journals')
+        .select('id, journal_date')
+        .in('id', openingJournalIds)
+        .lt('journal_date', startDate);
+
+      const openingJournalIdsSet = new Set(openingJournals?.map(j => j.id) || []);
+      
+      openingLines.forEach(line => {
+        if (openingJournalIdsSet.has(line.journal_id)) {
+          openingBalance += (line.debit - line.credit);
+        }
+      });
     }
 
     // Bangun ledger entries
@@ -132,22 +168,30 @@ export default function Ledger() {
     }
 
     // Tambah transaksi
-    journalLines?.forEach((line: any) => {
-      runningBalance = runningBalance + (line.debit - line.credit);
-      entries.push({
-        id: line.id,
-        date: line.journals.journal_date,
-        description: line.journals.description,
-        ref: line.journals.journal_number,
-        debit: line.debit,
-        credit: line.credit,
-        balance: runningBalance,
+    journals?.forEach(journal => {
+      const lines = journalLines.filter(jl => jl.journal_id === journal.id);
+      lines.forEach(line => {
+        runningBalance = runningBalance + (line.debit - line.credit);
+        entries.push({
+          id: line.id,
+          date: journal.journal_date,
+          description: journal.description,
+          ref: journal.journal_number,
+          debit: line.debit,
+          credit: line.credit,
+          balance: runningBalance,
+        });
       });
     });
 
+    console.log('Ledger entries:', entries.length);
     setLedgerData(entries);
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
     setLoading(false);
-  };
+  }
+};
 
   const totalDebit = ledgerData.reduce((sum, item) => sum + item.debit, 0);
   const totalCredit = ledgerData.reduce((sum, item) => sum + item.credit, 0);

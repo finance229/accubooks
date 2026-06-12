@@ -6,7 +6,7 @@ import { useCompany } from '../contexts/CompanyContext';
 import { formatCurrency } from '../lib/accountingHelpers';
 
 type AccountBalance = {
-  account_id: number;
+  id: number;
   account_code: string;
   account_name: string;
   balance: number;
@@ -45,63 +45,68 @@ export default function IncomeStatement() {
     }
   }, [currentCompany, startDate, endDate]);
 
- const fetchIncomeStatement = async () => {
-  if (!currentCompany?.id) return;
-  setLoading(true);
+  const fetchIncomeStatement = async () => {
+    if (!currentCompany?.id) return;
+    setLoading(true);
 
-  try {
-    // Ambil data dari view income_statement
-    const { data, error } = await supabase
-      .from('income_statement')
-      .select('*')
-      .eq('company_id', currentCompany.id);
+    try {
+      // Ambil data dari view income_statement
+      const { data: viewData, error } = await supabase
+        .from('income_statement')
+        .select('*')
+        .eq('company_id', currentCompany.id);
 
-    if (error) {
-      console.error('Error fetching income statement:', error);
+      if (error) {
+        console.error('Error fetching income statement:', error);
+        setLoading(false);
+        return;
+      }
+
+      console.log('Income statement data:', viewData);
+
+      if (!viewData || viewData.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Filter dan mapping untuk pendapatan
+      const revenueList = viewData
+        .filter(item => item.account_type === 'revenue' && item.balance !== 0)
+        .map(item => ({
+          id: item.coa_id,
+          account_code: item.account_code,
+          account_name: item.account_name,
+          balance: item.balance,
+          type: item.account_type,
+        }));
+
+      // Filter dan mapping untuk beban
+      const expensesList = viewData
+        .filter(item => item.account_type === 'expense' && item.balance !== 0)
+        .map(item => ({
+          id: item.coa_id,
+          account_code: item.account_code,
+          account_name: item.account_name,
+          balance: item.balance,
+          type: item.account_type,
+        }));
+
+      const totalRevenue = revenueList.reduce((sum, r) => sum + r.balance, 0);
+      const totalExpenses = expensesList.reduce((sum, e) => sum + e.balance, 0);
+
+      setData({
+        revenue: revenueList,
+        expenses: expensesList,
+        totalRevenue,
+        totalExpenses,
+        netIncome: totalRevenue - totalExpenses,
+      });
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    console.log('Income statement data:', data);
-
-    if (!data || data.length === 0) {
-      console.log('Tidak ada data');
-      setLoading(false);
-      return;
-    }
-
-    const revenueList = data
-      .filter(item => item.account_type === 'revenue' && item.balance !== 0)
-      .map(item => ({
-        account_code: item.account_code,
-        account_name: item.account_name,
-        balance: item.balance,
-      }));
-
-    const expensesList = data
-      .filter(item => item.account_type === 'expense' && item.balance !== 0)
-      .map(item => ({
-        account_code: item.account_code,
-        account_name: item.account_name,
-        balance: item.balance,
-      }));
-
-    const totalRevenue = revenueList.reduce((sum, r) => sum + r.balance, 0);
-    const totalExpenses = expensesList.reduce((sum, e) => sum + e.balance, 0);
-
-    setData({
-      revenue: revenueList,
-      expenses: expensesList,
-      totalRevenue,
-      totalExpenses,
-      netIncome: totalRevenue - totalExpenses,
-    });
-  } catch (error) {
-    console.error('Error:', error);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {
@@ -153,12 +158,12 @@ export default function IncomeStatement() {
         </div>
         <div class="section">
           <div class="section-title">PENDAPATAN</div>
-          ${data.revenue.map(item => `<div class="row"><span>${item.name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
+          ${data.revenue.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
           <div class="total-row"><span>TOTAL PENDAPATAN</span><span>${formatRp(data.totalRevenue)}</span></div>
         </div>
         <div class="section">
           <div class="section-title">BEBAN</div>
-          ${data.expenses.map(item => `<div class="row"><span>${item.name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
+          ${data.expenses.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
           <div class="total-row"><span>TOTAL BEBAN</span><span>${formatRp(data.totalExpenses)}</span></div>
         </div>
         <div class="net-income"><span>LABA BERSIH</span><span>${formatRp(data.netIncome)}</span></div>
@@ -175,13 +180,13 @@ export default function IncomeStatement() {
     csvContent += "PENDAPATAN\n";
     csvContent += "Akun,Jumlah\n";
     data.revenue.forEach(item => {
-      csvContent += `${item.name},${item.balance}\n`;
+      csvContent += `${item.account_name},${item.balance}\n`;
     });
     csvContent += `TOTAL PENDAPATAN,${data.totalRevenue}\n\n`;
     csvContent += "BEBAN\n";
     csvContent += "Akun,Jumlah\n";
     data.expenses.forEach(item => {
-      csvContent += `${item.name},${item.balance}\n`;
+      csvContent += `${item.account_name},${item.balance}\n`;
     });
     csvContent += `TOTAL BEBAN,${data.totalExpenses}\n\n`;
     csvContent += `LABA BERSIH,${data.netIncome}\n`;
@@ -206,20 +211,109 @@ export default function IncomeStatement() {
 
       <div className="bg-surface rounded-xl border border-border p-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div><label className="block text-sm font-medium mb-2">Dari Tanggal</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-          <div><label className="block text-sm font-medium mb-2">Sampai Tanggal</label><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-          <div className="flex items-end gap-2"><button onClick={fetchIncomeStatement} className="px-4 py-2 bg-accent text-white rounded-lg">Tampilkan</button></div>
-          <div className="flex items-end gap-2"><button onClick={handleDownloadPDF} className="px-4 py-2 border border-border rounded-lg hover:bg-background"><Printer className="w-4 h-4 inline mr-2" />PDF</button><button onClick={handleDownloadExcel} className="px-4 py-2 border border-border rounded-lg hover:bg-background"><FileSpreadsheet className="w-4 h-4 inline mr-2" />Excel</button></div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Dari Tanggal</label>
+            <input 
+              type="date" 
+              value={startDate} 
+              onChange={(e) => setStartDate(e.target.value)} 
+              className="w-full px-4 py-2 border rounded-lg" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Sampai Tanggal</label>
+            <input 
+              type="date" 
+              value={endDate} 
+              onChange={(e) => setEndDate(e.target.value)} 
+              className="w-full px-4 py-2 border rounded-lg" 
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <button 
+              onClick={fetchIncomeStatement} 
+              className="px-4 py-2 bg-accent text-white rounded-lg"
+            >
+              Tampilkan
+            </button>
+          </div>
+          <div className="flex items-end gap-2">
+            <button 
+              onClick={handleDownloadPDF} 
+              className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+            >
+              <Printer className="w-4 h-4 inline mr-2" />PDF
+            </button>
+            <button 
+              onClick={handleDownloadExcel} 
+              className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+            >
+              <FileSpreadsheet className="w-4 h-4 inline mr-2" />Excel
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="bg-surface rounded-xl border border-border overflow-hidden p-6">
-        {loading ? <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div> : (
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-accent" />
+          </div>
+        ) : (
           <>
-            <div className="text-center mb-8"><h2 className="font-display text-2xl font-bold">LAPORAN LABA RUGI</h2><p className="text-text-muted">{formatDate(startDate)} s/d {formatDate(endDate)}</p><p className="text-sm">{currentCompany.name}</p></div>
-            <div className="mb-8"><h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">PENDAPATAN</h3>{data.revenue.length === 0 ? <p className="text-text-muted">Tidak ada data</p> : data.revenue.map(item => (<div key={item.id} className="flex justify-between py-1"><span>{item.name}</span><span className="text-success">{formatCurrency(item.balance)}</span></div>))}<div className="flex justify-between pt-2 mt-2 border-t font-bold"><span>Total Pendapatan</span><span className="text-success">{formatCurrency(data.totalRevenue)}</span></div></div>
-            <div className="mb-8"><h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">BEBAN</h3>{data.expenses.length === 0 ? <p className="text-text-muted">Tidak ada data</p> : data.expenses.map(item => (<div key={item.id} className="flex justify-between py-1"><span>{item.name}</span><span className="text-danger">{formatCurrency(item.balance)}</span></div>))}<div className="flex justify-between pt-2 mt-2 border-t font-bold"><span>Total Beban</span><span className="text-danger">{formatCurrency(data.totalExpenses)}</span></div></div>
-            <div className="bg-info/10 p-4 rounded-lg"><div className="flex justify-between font-bold text-xl"><span>LABA BERSIH</span><span className={data.netIncome >= 0 ? 'text-success' : 'text-danger'}>{formatCurrency(data.netIncome)}</span></div></div>
+            <div className="text-center mb-8">
+              <h2 className="font-display text-2xl font-bold">LAPORAN LABA RUGI</h2>
+              <p className="text-text-muted">{formatDate(startDate)} s/d {formatDate(endDate)}</p>
+              <p className="text-sm">{currentCompany.name}</p>
+            </div>
+
+            {/* PENDAPATAN */}
+            <div className="mb-8">
+              <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">PENDAPATAN</h3>
+              {data.revenue.length === 0 ? (
+                <p className="text-text-muted">Tidak ada data pendapatan</p>
+              ) : (
+                data.revenue.map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-1">
+                    <span className="text-text">{item.account_name}</span>
+                    <span className="text-success">{formatCurrency(item.balance)}</span>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between pt-2 mt-2 border-t font-bold">
+                <span>Total Pendapatan</span>
+                <span className="text-success">{formatCurrency(data.totalRevenue)}</span>
+              </div>
+            </div>
+
+            {/* BEBAN */}
+            <div className="mb-8">
+              <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">BEBAN</h3>
+              {data.expenses.length === 0 ? (
+                <p className="text-text-muted">Tidak ada data beban</p>
+              ) : (
+                data.expenses.map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-1">
+                    <span className="text-text">{item.account_name}</span>
+                    <span className="text-danger">{formatCurrency(item.balance)}</span>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between pt-2 mt-2 border-t font-bold">
+                <span>Total Beban</span>
+                <span className="text-danger">{formatCurrency(data.totalExpenses)}</span>
+              </div>
+            </div>
+
+            {/* LABA BERSIH */}
+            <div className="bg-info/10 p-4 rounded-lg">
+              <div className="flex justify-between font-bold text-xl">
+                <span>LABA BERSIH</span>
+                <span className={data.netIncome >= 0 ? 'text-success' : 'text-danger'}>
+                  {formatCurrency(data.netIncome)}
+                </span>
+              </div>
+            </div>
           </>
         )}
       </div>

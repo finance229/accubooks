@@ -13,6 +13,7 @@ import {
   getBankAccounts
 } from '../lib/accountingHelpers';
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
+import AgingModal from '../components/AgingModal';
 
 type Invoice = {
   id: number;
@@ -71,6 +72,7 @@ export default function Invoices() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAgingModal, setShowAgingModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState('transfer');
@@ -138,11 +140,11 @@ export default function Invoices() {
   };
 
   const fetchBankAccounts = async () => {
-  if (!currentCompany?.id) return;
-  const banks = await getBankAccounts(currentCompany.id);
-  console.log('Bank accounts fetched:', banks); // Debug
-  setBankAccounts(banks);
-};
+    if (!currentCompany?.id) return;
+    const banks = await getBankAccounts(currentCompany.id);
+    setBankAccounts(banks);
+  };
+
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
@@ -298,17 +300,16 @@ export default function Invoices() {
     setCustomerSearch('');
   };
 
- const handleVerifyInvoice = async (invoice: Invoice) => {
-  try {
-    // Gunakan getDefaultAccount dengan company ID
-    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
-    const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
-    const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
-    
-    if (!receivableAcc || !revenueAcc) {
-      alert(`Akun tidak ditemukan. Cek COA untuk company ${currentCompany?.name}`);
-      return;
-    }
+  const handleVerifyInvoice = async (invoice: Invoice) => {
+    try {
+      const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+      const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
+      const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
+      
+      if (!receivableAcc || !revenueAcc) {
+        alert(`Akun tidak ditemukan. Cek COA untuk company ${currentCompany?.name}`);
+        return;
+      }
 
       const entries = [
         { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },
@@ -489,6 +490,56 @@ export default function Invoices() {
     alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
   };
 
+  // ========== AGING REPORT ==========
+  const calculateAging = (invoice: Invoice) => {
+    const today = new Date();
+    const dueDate = new Date(invoice.due_date);
+    const diffTime = today.getTime() - dueDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (invoice.status === 'paid') return null;
+    
+    const remaining = invoice.total - (invoice.paid_amount || 0);
+    if (remaining <= 0) return null;
+    
+    let agingCategory = '';
+    if (diffDays <= 0) agingCategory = 'Belum Jatuh Tempo';
+    else if (diffDays <= 30) agingCategory = '1-30 Hari';
+    else if (diffDays <= 60) agingCategory = '31-60 Hari';
+    else if (diffDays <= 90) agingCategory = '61-90 Hari';
+    else agingCategory = '> 90 Hari';
+    
+    return {
+      customer: invoice.customer_name,
+      invoice: invoice.invoice_number,
+      dueDate: invoice.due_date,
+      remaining: remaining,
+      agingCategory: agingCategory,
+      diffDays: diffDays,
+    };
+  };
+
+  const getAgingData = () => {
+    const agingData = {
+      'Belum Jatuh Tempo': { count: 0, total: 0, items: [] as any[] },
+      '1-30 Hari': { count: 0, total: 0, items: [] as any[] },
+      '31-60 Hari': { count: 0, total: 0, items: [] as any[] },
+      '61-90 Hari': { count: 0, total: 0, items: [] as any[] },
+      '> 90 Hari': { count: 0, total: 0, items: [] as any[] },
+    };
+    
+    invoices.forEach(inv => {
+      const result = calculateAging(inv);
+      if (result && agingData[result.agingCategory]) {
+        agingData[result.agingCategory].count++;
+        agingData[result.agingCategory].total += result.remaining;
+        agingData[result.agingCategory].items.push(result);
+      }
+    });
+    
+    return agingData;
+  };
+
   const filteredInvoices = invoices.filter(inv => {
     const matchesSearch = inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          inv.customer_name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -536,9 +587,17 @@ export default function Invoices() {
           <h1 className="font-display text-3xl font-bold text-text">Invoice Penjualan</h1>
           <p className="text-text-muted mt-1">Kelola faktur penjualan dengan customer</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
-          <Plus className="w-5 h-5" /> Buat Invoice
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setShowAgingModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-accent text-accent rounded-lg hover:bg-accent/5 transition-colors"
+          >
+            📊 Aging Report
+          </button>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
+            <Plus className="w-5 h-5" /> Buat Invoice
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -571,9 +630,7 @@ export default function Invoices() {
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-8">Loading...</td>
-                </tr>
+                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
               ) : (
                 filteredInvoices.map((invoice) => (
                   <tr key={invoice.id} className="hover:bg-background transition-colors">
@@ -588,30 +645,12 @@ export default function Invoices() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {invoice.status === 'draft' && (
-                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                        )}
-                        {(invoice.status === 'draft' || invoice.status === 'sent') && (
-                          <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                        {invoice.status !== 'paid' && (
-                          <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg">
-                            <DollarSign className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg">
-                          <Download className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg">
-                          <Send className="w-4 h-4" />
-                        </button>
+                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
+                        {invoice.status === 'draft' && <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>}
+                        {(invoice.status === 'draft' || invoice.status === 'sent') && <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><CheckCircle className="w-4 h-4" /></button>}
+                        {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
+                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
+                        <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><Send className="w-4 h-4" /></button>
                       </div>
                     </td>
                   </tr>
@@ -665,6 +704,17 @@ export default function Invoices() {
 
       {/* Modal Detail */}
       {showDetailModal && selectedInvoice && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-lg"><div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Invoice</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div><div className="space-y-2 mt-4"><p><strong>No:</strong> {selectedInvoice.invoice_number}</p><p><strong>Customer:</strong> {selectedInvoice.customer_name}</p><p><strong>Tanggal:</strong> {selectedInvoice.invoice_date}</p><p><strong>Jatuh Tempo:</strong> {selectedInvoice.due_date}</p><p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p><p><strong>Sudah Dibayar:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}</p><p><strong>Sisa:</strong> {formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p><p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p></div><div className="flex justify-end mt-6"><button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button></div></div></div>)}
+
+      {/* Aging Modal */}
+      {showAgingModal && (
+        <AgingModal
+          isOpen={showAgingModal}
+          onClose={() => setShowAgingModal(false)}
+          title="Aging Report - Piutang Usaha (AR)"
+          data={getAgingData()}
+          type="AR"
+        />
+      )}
     </div>
   );
 }

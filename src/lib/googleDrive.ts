@@ -1,4 +1,5 @@
-import { supabase } from './supabase';
+const GAS_UPLOAD_URL = import.meta.env.VITE_GAS_UPLOAD_URL || '';
+const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
 
 export type UploadResult = {
   success: boolean;
@@ -9,52 +10,61 @@ export type UploadResult = {
 };
 
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
-  try {
-    // Gunakan Supabase Storage
-    const filePath = `${folder || 'documents'}/${Date.now()}_${file.name}`;
-    
-    const { data, error } = await supabase.storage
-      .from('documents')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false,
-      });
-
-    if (error) {
-      console.error('Upload error:', error);
-      return { success: false, error: error.message };
+  return new Promise((resolve) => {
+    if (!GAS_UPLOAD_URL) {
+      resolve({ success: false, error: 'Google Apps Script URL not configured' });
+      return;
     }
 
-    // Dapatkan public URL
-    const { data: publicUrlData } = supabase.storage
-      .from('documents')
-      .getPublicUrl(data?.path || filePath);
+    const formData = new FormData();
+    formData.append('fileData', file);
+    formData.append('fileName', file.name);
+    formData.append('mimeType', file.type);
+    formData.append('folderId', DRIVE_FOLDER_ID);
+    formData.append('subFolder', folder || 'documents');
 
-    return {
-      success: true,
-      fileId: data?.path || filePath,
-      fileUrl: publicUrlData?.publicUrl || '',
-      fileName: file.name,
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', GAS_UPLOAD_URL, true);
+    
+    xhr.onload = function() {
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (result.success) {
+          resolve({
+            success: true,
+            fileId: result.fileId,
+            fileUrl: result.fileUrl,
+            fileName: file.name,
+          });
+        } else {
+          resolve({ success: false, error: result.error || 'Upload failed' });
+        }
+      } catch (error) {
+        resolve({ success: false, error: 'Invalid response from server' });
+      }
     };
-  } catch (error) {
-    console.error('Upload error:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+    
+    xhr.onerror = function() {
+      resolve({ success: false, error: 'Network error' });
     };
-  }
+    
+    xhr.ontimeout = function() {
+      resolve({ success: false, error: 'Upload timeout' });
+    };
+    
+    xhr.timeout = 60000; // 60 seconds
+    xhr.send(formData);
+  });
 }
 
 export function getGoogleDrivePreviewUrl(fileId: string): string {
-  return fileId; // untuk Supabase, fileId adalah path
+  return `https://drive.google.com/file/d/${fileId}/preview`;
 }
 
 export function getGoogleDriveDownloadUrl(fileId: string): string {
-  const { data } = supabase.storage.from('documents').getPublicUrl(fileId);
-  return data?.publicUrl || '';
+  return `https://drive.google.com/uc?export=download&id=${fileId}`;
 }
 
 export function openGoogleDriveFile(fileId: string): void {
-  const url = getGoogleDriveDownloadUrl(fileId);
-  window.open(url, '_blank');
+  window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
 }

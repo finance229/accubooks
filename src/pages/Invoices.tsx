@@ -239,10 +239,14 @@ export default function Invoices() {
       return;
     }
     if (!currentCompany?.id) return;
-
-    const year = new Date().getFullYear();
-    const count = invoices.length + 1;
-    const invoiceNumber = `INV/${currentCompany.id}/${year}/${String(count).padStart(4, '0')}`;
+const projectCode = formData.project_id 
+  ? projects.find(p => p.id === formData.project_id)?.code || null
+  : null;
+const invoiceNumber = await generateInvoiceNo(
+  currentCompany.id,
+  new Date(formData.invoice_date),
+  projectCode
+);
 
     const { data: invoiceData, error: invoiceError } = await supabase
       .from('invoices')

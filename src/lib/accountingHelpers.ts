@@ -532,6 +532,51 @@ export const createVendorIfNotExist = async (
   return newVendor.id;
 };
 
+// ============================================
+// GENERATE INVOICE NO & VOUCHER NO
+// ============================================
+export const generateInvoiceNo = async (
+  companyId: number,
+  date: Date,
+  projectCode: string | null = null
+): Promise<string> => {
+  const { data, error } = await supabase.rpc('generate_invoice_no', {
+    p_company_id: companyId,
+    p_date: date.toISOString().split('T')[0],
+    p_project_code: projectCode,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const generateVoucherNo = async (
+  companyId: number,
+  date: Date,
+  projectCode: string | null = null
+): Promise<string> => {
+  const { data, error } = await supabase.rpc('generate_voucher_no', {
+    p_company_id: companyId,
+    p_date: date.toISOString().split('T')[0],
+    p_project_code: projectCode,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const previewVoucherNo = async (
+  companyId: number,
+  date: Date,
+  projectCode: string | null = null
+): Promise<string> => {
+  const { data, error } = await supabase.rpc('preview_voucher_no', {
+    p_company_id: companyId,
+    p_date: date.toISOString().split('T')[0],
+    p_project_code: projectCode,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
 export const createProjectIfNotExist = async (
   companyId: number,
   code: string,

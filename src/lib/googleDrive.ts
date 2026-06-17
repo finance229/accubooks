@@ -10,10 +10,9 @@ export type UploadResult = {
 };
 
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
-  return new Promise((resolve) => {
+  try {
     if (!GAS_UPLOAD_URL) {
-      resolve({ success: false, error: 'Google Apps Script URL not configured' });
-      return;
+      return { success: false, error: 'Google Apps Script URL not configured' };
     }
 
     const formData = new FormData();
@@ -23,38 +22,37 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
     formData.append('folderId', DRIVE_FOLDER_ID);
     formData.append('subFolder', folder || 'documents');
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', GAS_UPLOAD_URL, true);
-    
-    xhr.onload = function() {
-      try {
-        const result = JSON.parse(xhr.responseText);
-        if (result.success) {
-          resolve({
-            success: true,
-            fileId: result.fileId,
-            fileUrl: result.fileUrl,
-            fileName: file.name,
-          });
-        } else {
-          resolve({ success: false, error: result.error || 'Upload failed' });
-        }
-      } catch (error) {
-        resolve({ success: false, error: 'Invalid response from server' });
-      }
+    const response = await fetch(GAS_UPLOAD_URL, {
+      method: 'POST',
+      body: formData,
+      // 🔥 JANGAN tambahkan header apapun! Biarkan browser set sendiri.
+      mode: 'cors',
+      credentials: 'omit',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+
+    if (result.success) {
+      return {
+        success: true,
+        fileId: result.fileId,
+        fileUrl: result.fileUrl,
+        fileName: file.name,
+      };
+    } else {
+      return { success: false, error: result.error || 'Upload failed' };
+    }
+  } catch (error) {
+    console.error('Upload error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
-    
-    xhr.onerror = function() {
-      resolve({ success: false, error: 'Network error' });
-    };
-    
-    xhr.ontimeout = function() {
-      resolve({ success: false, error: 'Upload timeout' });
-    };
-    
-    xhr.timeout = 60000;
-    xhr.send(formData);
-  });
+  }
 }
 
 export function getGoogleDrivePreviewUrl(fileId: string): string {

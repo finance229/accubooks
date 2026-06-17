@@ -272,7 +272,6 @@ export default function PaymentRequests() {
 
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
-    const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ';
     const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || null;
 const voucherCode = await generateVoucherNo(
   currentCompany!.id,

@@ -1,5 +1,4 @@
-const GAS_UPLOAD_URL = import.meta.env.VITE_GAS_UPLOAD_URL || '';
-const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
+import { supabase } from './supabase';
 
 export type UploadResult = {
   success: boolean;
@@ -11,41 +10,32 @@ export type UploadResult = {
 
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
   try {
-    if (!GAS_UPLOAD_URL) {
-      return { success: false, error: 'Google Apps Script URL not configured' };
+    // Gunakan Supabase Storage
+    const filePath = `${folder || 'documents'}/${Date.now()}_${file.name}`;
+    
+    const { data, error } = await supabase.storage
+      .from('documents')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Upload error:', error);
+      return { success: false, error: error.message };
     }
 
-    const formData = new FormData();
-    formData.append('fileData', file);
-    formData.append('fileName', file.name);
-    formData.append('mimeType', file.type);
-    formData.append('folderId', DRIVE_FOLDER_ID);
-    formData.append('subFolder', folder || 'documents');
+    // Dapatkan public URL
+    const { data: publicUrlData } = supabase.storage
+      .from('documents')
+      .getPublicUrl(data?.path || filePath);
 
-    const response = await fetch(GAS_UPLOAD_URL, {
-      method: 'POST',
-      body: formData,
-      // 🔥 JANGAN tambahkan header apapun! Biarkan browser set sendiri.
-      mode: 'cors',
-      credentials: 'omit',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      return {
-        success: true,
-        fileId: result.fileId,
-        fileUrl: result.fileUrl,
-        fileName: file.name,
-      };
-    } else {
-      return { success: false, error: result.error || 'Upload failed' };
-    }
+    return {
+      success: true,
+      fileId: data?.path || filePath,
+      fileUrl: publicUrlData?.publicUrl || '',
+      fileName: file.name,
+    };
   } catch (error) {
     console.error('Upload error:', error);
     return {
@@ -56,13 +46,15 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
 }
 
 export function getGoogleDrivePreviewUrl(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/preview`;
+  return fileId; // untuk Supabase, fileId adalah path
 }
 
 export function getGoogleDriveDownloadUrl(fileId: string): string {
-  return `https://drive.google.com/uc?export=download&id=${fileId}`;
+  const { data } = supabase.storage.from('documents').getPublicUrl(fileId);
+  return data?.publicUrl || '';
 }
 
 export function openGoogleDriveFile(fileId: string): void {
-  window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
+  const url = getGoogleDriveDownloadUrl(fileId);
+  window.open(url, '_blank');
 }

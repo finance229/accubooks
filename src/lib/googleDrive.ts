@@ -52,7 +52,7 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
       resolve({ success: false, error: 'Upload timeout' });
     };
     
-    xhr.timeout = 60000; // 60 seconds
+    xhr.timeout = 60000;
     xhr.send(formData);
   });
 }

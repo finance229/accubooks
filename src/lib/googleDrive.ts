@@ -10,58 +10,50 @@ export type UploadResult = {
 };
 
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
-  try {
+  return new Promise((resolve) => {
     if (!GAS_UPLOAD_URL) {
-      throw new Error('Google Apps Script URL not configured');
+      resolve({ success: false, error: 'Google Apps Script URL not configured' });
+      return;
     }
 
-    // Convert file to base64
-    const base64 = await fileToBase64(file);
-    
-    // Kirim sebagai FormData (tidak memicu preflight CORS)
     const formData = new FormData();
-    formData.append('fileData', base64);
+    formData.append('fileData', file);
     formData.append('fileName', file.name);
     formData.append('mimeType', file.type);
     formData.append('folderId', DRIVE_FOLDER_ID);
     formData.append('subFolder', folder || 'documents');
 
-    const response = await fetch(GAS_UPLOAD_URL, {
-      method: 'POST',
-      body: formData,
-    });
-
-    const result = await response.json();
-
-    if (result.success) {
-      return {
-        success: true,
-        fileId: result.fileId,
-        fileUrl: result.fileUrl,
-        fileName: file.name,
-      };
-    } else {
-      throw new Error(result.error || 'Upload failed');
-    }
-  } catch (error) {
-    console.error('Error uploading to Google Drive:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', GAS_UPLOAD_URL, true);
+    
+    xhr.onload = function() {
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (result.success) {
+          resolve({
+            success: true,
+            fileId: result.fileId,
+            fileUrl: result.fileUrl,
+            fileName: file.name,
+          });
+        } else {
+          resolve({ success: false, error: result.error || 'Upload failed' });
+        }
+      } catch (error) {
+        resolve({ success: false, error: 'Invalid response from server' });
+      }
     };
-  }
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      resolve(base64);
+    
+    xhr.onerror = function() {
+      resolve({ success: false, error: 'Network error' });
     };
-    reader.onerror = (error) => reject(error);
+    
+    xhr.ontimeout = function() {
+      resolve({ success: false, error: 'Upload timeout' });
+    };
+    
+    xhr.timeout = 60000; // 60 seconds
+    xhr.send(formData);
   });
 }
 

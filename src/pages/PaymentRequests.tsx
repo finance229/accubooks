@@ -6,7 +6,7 @@ import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   formatCurrency, 
-  generateVoucherCode, 
+  generateVoucherNo, 
   createAccrualJournal, 
   createPaymentJournal, 
   addPaymentLog,
@@ -273,7 +273,12 @@ export default function PaymentRequests() {
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
     const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ';
-    const voucherCode = await generateVoucherCode(currentCompany!.id, projectCode, new Date());
+    const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || null;
+const voucherCode = await generateVoucherNo(
+  currentCompany!.id,
+  new Date(),
+  projectCode
+);
 
     // Update project spent
     await updateProjectSpent(verifyData.projectId, request.amount);

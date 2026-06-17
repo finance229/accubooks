@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, CheckSquare, Square } from 'lucide-react';
+import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
@@ -10,9 +10,11 @@ import {
   getDefaultAccount,
   createVendorIfNotExist,
   createProjectIfNotExist,
-  checkProjectBudget,
-  updateProjectSpent
+  getBankAccounts,
+  getExpenseAccounts,
+  getLiabilityAccounts
 } from '../lib/accountingHelpers';
+import AgingModal from '../components/AgingModal';
 
 type Vendor = {
   id: number;
@@ -80,17 +82,18 @@ export default function PurchaseInvoices() {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAgingModal, setShowAgingModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<PurchaseInvoice | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [includePpn, setIncludePpn] = useState(true);
   const [includePph, setIncludePph] = useState(false);
   
-  // State untuk modal buat vendor baru
+  // Modal vendor baru
   const [showNewVendorModal, setShowNewVendorModal] = useState(false);
   const [newVendor, setNewVendor] = useState({ name: '', npwp: '', phone: '', email: '', address: '', bank_name: '', bank_account: '' });
   
-  // State untuk modal buat proyek baru
+  // Modal proyek baru
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
@@ -169,24 +172,15 @@ export default function PurchaseInvoices() {
 
   const fetchCoa = async () => {
     if (!currentCompany?.id) return;
-    const { data } = await supabase
-      .from('coa')
-      .select('id, code, name, type')
-      .eq('company_id', currentCompany.id)
-      .in('type', ['expense', 'asset']);
-    setCoaList(data || []);
+    const expenseData = await getExpenseAccounts(currentCompany.id);
+    const liabilityData = await getLiabilityAccounts(currentCompany.id);
+    setCoaList([...expenseData, ...liabilityData]);
   };
 
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;
-    const suffix = currentCompany.id === 1 ? 'A' : currentCompany.id === 2 ? 'B' : 'C';
-    const { data } = await supabase
-      .from('coa')
-      .select('id, code, name')
-      .eq('company_id', currentCompany.id)
-      .like('code', `1102-%${suffix}`)
-      .or('code', `1101-%${suffix}`);
-    setBankAccounts(data || []);
+    const banks = await getBankAccounts(currentCompany.id);
+    setBankAccounts(banks);
   };
 
   const filteredVendors = vendors.filter(v =>
@@ -256,6 +250,19 @@ export default function PurchaseInvoices() {
     }
   };
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
   const handleCreateInvoice = async () => {
     if (!formData.vendor_id || !formData.invoice_number || formData.amount <= 0) {
       alert('Lengkapi vendor, nomor invoice, dan jumlah');
@@ -269,7 +276,7 @@ export default function PurchaseInvoices() {
 
     setUploading(true);
     
-    // Upload ke Google Drive (gunakan fungsi yang sudah ada)
+    // Upload ke Google Drive
     const gasUrl = import.meta.env.VITE_GAS_UPLOAD_URL;
     const folderId = import.meta.env.VITE_DRIVE_FOLDER_ID;
     
@@ -330,19 +337,6 @@ export default function PurchaseInvoices() {
       fetchInvoices();
     }
     setUploading(false);
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = (error) => reject(error);
-    });
   };
 
   const resetForm = () => {
@@ -424,9 +418,9 @@ export default function PurchaseInvoices() {
     }
 
     // Dapatkan akun default
-   const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
-  const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
-  const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
+    const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
+    const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
+    const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
     const debitAcc = coaList.find(c => c.id === verifyData.debitAccountId);
     
     if (!debitAcc || !payableAcc) {
@@ -498,7 +492,10 @@ export default function PurchaseInvoices() {
     }
 
     // Update project spent
-    await updateProjectSpent(verifyData.projectId, selectedInvoice.total);
+    await supabase
+      .from('projects')
+      .update({ spent: (projects.find(p => p.id === verifyData.projectId)?.spent || 0) + selectedInvoice.total })
+      .eq('id', verifyData.projectId);
 
     // Update invoice
     const { error } = await supabase
@@ -619,6 +616,56 @@ export default function PurchaseInvoices() {
     }
   };
 
+  // ========== AGING REPORT ==========
+  const calculateAgingAP = (invoice: PurchaseInvoice) => {
+    const today = new Date();
+    const dueDate = new Date(invoice.due_date);
+    const diffTime = today.getTime() - dueDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (invoice.status === 'paid') return null;
+    
+    const remaining = invoice.total - (invoice.paid_amount || 0);
+    if (remaining <= 0) return null;
+    
+    let agingCategory = '';
+    if (diffDays <= 0) agingCategory = 'Belum Jatuh Tempo';
+    else if (diffDays <= 30) agingCategory = '1-30 Hari';
+    else if (diffDays <= 60) agingCategory = '31-60 Hari';
+    else if (diffDays <= 90) agingCategory = '61-90 Hari';
+    else agingCategory = '> 90 Hari';
+    
+    return {
+      vendor: invoice.vendor_name,
+      invoice: invoice.invoice_number,
+      dueDate: invoice.due_date,
+      remaining: remaining,
+      agingCategory: agingCategory,
+      diffDays: diffDays,
+    };
+  };
+
+  const getAgingDataAP = () => {
+    const agingData = {
+      'Belum Jatuh Tempo': { count: 0, total: 0, items: [] as any[] },
+      '1-30 Hari': { count: 0, total: 0, items: [] as any[] },
+      '31-60 Hari': { count: 0, total: 0, items: [] as any[] },
+      '61-90 Hari': { count: 0, total: 0, items: [] as any[] },
+      '> 90 Hari': { count: 0, total: 0, items: [] as any[] },
+    };
+    
+    invoices.forEach(inv => {
+      const result = calculateAgingAP(inv);
+      if (result && agingData[result.agingCategory]) {
+        agingData[result.agingCategory].count++;
+        agingData[result.agingCategory].total += result.remaining;
+        agingData[result.agingCategory].items.push(result);
+      }
+    });
+    
+    return agingData;
+  };
+
   const filteredInvoices = invoices.filter(inv => {
     const matchesSearch = inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          inv.vendor_name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -648,6 +695,13 @@ export default function PurchaseInvoices() {
     return labels[status] || status;
   };
 
+  const stats = {
+    total: invoices.length,
+    totalAmount: invoices.reduce((s, i) => s + i.total, 0),
+    pending: invoices.filter(i => i.status === 'submitted' || i.status === 'verified').length,
+    outstanding: invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.total - (i.paid_amount || 0)), 0),
+  };
+
   if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
   return (
@@ -658,16 +712,24 @@ export default function PurchaseInvoices() {
           <p className="text-text-muted mt-1">Kelola invoice pembelian dari vendor</p>
           <p className="text-xs text-text-muted mt-1">Staff → Finance (Verifikasi & Pilih Akun) → Direktur (Bayar)</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
-          <Plus className="w-5 h-5" /> Buat AP
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setShowAgingModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-accent text-accent rounded-lg hover:bg-accent/5 transition-colors"
+          >
+            📊 Aging Report
+          </button>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
+            <Plus className="w-5 h-5" /> Buat AP
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Total AP</p><p className="text-2xl font-bold">{invoices.length}</p></div>
-        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Total Amount</p><p className="text-lg font-bold">{formatCurrency(invoices.reduce((s, i) => s + i.total, 0))}</p></div>
-        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Pending</p><p className="text-2xl font-bold text-warning">{invoices.filter(i => i.status === 'submitted' || i.status === 'verified').length}</p></div>
-        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Outstanding</p><p className="text-lg font-bold text-danger">{formatCurrency(invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.total - (i.paid_amount || 0)), 0))}</p></div>
+        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Total AP</p><p className="text-2xl font-bold">{stats.total}</p></div>
+        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Total Amount</p><p className="text-lg font-bold">{formatCurrency(stats.totalAmount)}</p></div>
+        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Pending</p><p className="text-2xl font-bold text-warning">{stats.pending}</p></div>
+        <div className="bg-surface rounded-xl border border-border p-4"><p className="text-text-muted text-xs">Outstanding</p><p className="text-lg font-bold text-danger">{formatCurrency(stats.outstanding)}</p></div>
       </div>
 
       <div className="bg-surface rounded-xl border border-border p-6">
@@ -745,25 +807,10 @@ export default function PurchaseInvoices() {
               </div>
               <div><label className="block text-sm font-medium mb-1">Nomor Invoice Vendor *</label><input type="text" value={formData.invoice_number} onChange={e => setFormData({...formData, invoice_number: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
               <div className="grid grid-cols-2 gap-4"><div><label>Tanggal Invoice</label><input type="date" value={formData.invoice_date} onChange={e => setFormData({...formData, invoice_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>Jatuh Tempo</label><input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div></div>
-              
-              {/* Proyek Selection */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Proyek (Opsional)</label>
-                <div className="flex gap-2">
-                  <select value={formData.project_id || ''} onChange={e => setFormData({...formData, project_id: e.target.value ? parseInt(e.target.value) : null})} className="flex-1 px-4 py-2 border rounded-lg">
-                    <option value="">-- Tidak Ada Proyek --</option>
-                    {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}
-                  </select>
-                  <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5">+ Baru</button>
-                </div>
-              </div>
-              
+              <div><label>Proyek (Opsional)</label><div className="flex gap-2"><select value={formData.project_id || ''} onChange={e => setFormData({...formData, project_id: e.target.value ? parseInt(e.target.value) : null})} className="flex-1 px-4 py-2 border rounded-lg"><option value="">-- Tidak Ada Proyek --</option>{projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}</select><button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button></div></div>
               <div><label>Deskripsi</label><textarea rows={2} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
               <div><label>Jumlah (DPP)</label><input type="number" value={formData.amount || ''} onChange={e => setFormData({...formData, amount: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /></div>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={includePpn} onChange={e => setIncludePpn(e.target.checked)} /> + PPN 11% (Masukan)</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={includePph} onChange={e => setIncludePph(e.target.checked)} /> - PPh 23 (2%)</label>
-              </div>
+              <div className="flex gap-4"><label className="flex items-center gap-2"><input type="checkbox" checked={includePpn} onChange={e => setIncludePpn(e.target.checked)} /> + PPN 11% (Masukan)</label><label className="flex items-center gap-2"><input type="checkbox" checked={includePph} onChange={e => setIncludePph(e.target.checked)} /> - PPh 23 (2%)</label></div>
               <div><label>Upload Invoice Vendor *</label><input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setAttachmentFile(e.target.files?.[0] || null)} className="w-full" /></div>
             </div>
             <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateInvoice} disabled={uploading} className="px-4 py-2 bg-accent text-white rounded-lg">{uploading ? 'Uploading...' : 'Simpan Draft'}</button></div>
@@ -792,7 +839,7 @@ export default function PurchaseInvoices() {
                     <option value={0}>-- Tidak Ada Proyek --</option>
                     {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})</option>))}
                   </select>
-                  <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5">+ Baru</button>
+                  <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button>
                 </div>
               </div>
               <div>
@@ -863,7 +910,7 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Buat Vendor Baru */}
+      {/* Modal Vendor Baru */}
       {showNewVendorModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -885,7 +932,7 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Buat Proyek Baru */}
+      {/* Modal Proyek Baru */}
       {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -901,6 +948,17 @@ export default function PurchaseInvoices() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Aging Modal */}
+      {showAgingModal && (
+        <AgingModal
+          isOpen={showAgingModal}
+          onClose={() => setShowAgingModal(false)}
+          title="Aging Report - Hutang Usaha (AP)"
+          data={getAgingDataAP()}
+          type="AP"
+        />
       )}
     </div>
   );

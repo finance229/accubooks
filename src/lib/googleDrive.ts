@@ -1,18 +1,5 @@
-// src/lib/googleDrive.ts
-const GAS_URL = import.meta.env.VITE_GAS_UPLOAD_URL || '';
-const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
-
-export type UploadResult = {
-  success: boolean;
-  fileId?: string;
-  fileUrl?: string;
-  fileName?: string;
-  error?: string;
-};
-
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
   try {
-    // Convert file ke base64
     const base64 = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -22,31 +9,27 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
       reader.readAsDataURL(file);
     });
 
-    // ✅ Pakai URLSearchParams, bukan FormData
-    const params = new URLSearchParams();
-    params.append('fileData', base64);
-    params.append('fileName', file.name);
-    params.append('mimeType', file.type);
-    params.append('folderId', DRIVE_FOLDER_ID);
-    params.append('subFolder', folder || 'documents');
+    const params = {
+      fileData: base64,
+      fileName: file.name,
+      mimeType: file.type,
+      folderId: DRIVE_FOLDER_ID,
+      subFolder: folder || 'documents',
+    };
 
-    console.log('📤 Uploading to GAS...');
-
-    const response = await fetch(GAS_URL, {
+    // ✅ Fetch ke /api/upload (Vercel proxy), bukan langsung ke GAS
+    const response = await fetch('/api/upload', {
       method: 'POST',
-      mode: 'no-cors',
-      body: params.toString(),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
     });
 
-    console.log('✅ Upload initiated (check Google Drive)');
+    const result = await response.json();
+    return result;
 
-    return {
-      success: true,
-      fileUrl: `Uploaded: ${file.name} (check Google Drive)`,
-      fileName: file.name,
-    };
   } catch (error) {
-    console.error('❌ Upload error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

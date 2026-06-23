@@ -35,77 +35,58 @@ export default function Documents() {
 
   const fetchDocuments = async () => {
     if (!currentCompany?.id) return;
-    
     setLoading(true);
     const { data } = await supabase
       .from('documents')
       .select('*')
       .eq('company_id', currentCompany.id)
       .order('created_at', { ascending: false });
-    
     setDocuments(data || []);
     setLoading(false);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-    }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = (error) => reject(error);
-    });
+    if (file) setSelectedFile(file);
   };
 
   const handleUpload = async () => {
-  if (!selectedFile) return;
-  if (!currentCompany?.id) return;
+    if (!selectedFile) return;
+    if (!currentCompany?.id) return;
 
-  setUploading(true);
-  
-  try {
-    // ✅ Pakai uploadToGoogleDrive, bukan fetch langsung ke GAS
-    const result = await uploadToGoogleDrive(selectedFile, selectedType);
-    
-    if (result.success) {
-      const { data, error } = await supabase
-        .from('documents')
-        .insert([{
-          company_id: currentCompany.id,
-          name: selectedFile.name,
-          type: selectedType,
-          file_id: result.fileId,
-          file_url: result.fileUrl,
-          mime_type: selectedFile.type,
-          size_bytes: selectedFile.size,
-        }])
-        .select();
-      
-      if (!error && data) {
-        setDocuments([data[0], ...documents]);
-        setShowUpload(false);
-        setSelectedFile(null);
+    setUploading(true);
+    try {
+      const result = await uploadToGoogleDrive(selectedFile, selectedType);
+
+      if (result.success) {
+        const { data, error } = await supabase
+          .from('documents')
+          .insert([{
+            company_id: currentCompany.id,
+            name: selectedFile.name,
+            type: selectedType,
+            file_id: result.fileId,
+            file_url: result.fileUrl,
+            mime_type: selectedFile.type,
+            size_bytes: selectedFile.size,
+          }])
+          .select();
+
+        if (!error && data) {
+          setDocuments([data[0], ...documents]);
+          setShowUpload(false);
+          setSelectedFile(null);
+        }
+      } else {
+        alert('Gagal upload: ' + (result.error || 'Unknown error'));
       }
-    } else {
-      alert('Gagal upload: ' + (result.error || 'Unknown error'));
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('Gagal upload file');
+    } finally {
+      setUploading(false);
     }
-  } catch (error) {
-    console.error('Upload error:', error);
-    alert('Gagal upload file');
-  } finally {
-    setUploading(false);
-  }
-};
+  };
 
   const handleDelete = async (id: string) => {
     if (confirm('Yakin ingin menghapus dokumen ini?')) {
@@ -113,7 +94,6 @@ export default function Documents() {
         .from('documents')
         .delete()
         .eq('id', id);
-      
       if (!error) {
         setDocuments(documents.filter(d => d.id !== id));
       }
@@ -202,7 +182,7 @@ export default function Documents() {
           className="bg-surface rounded-xl border border-border p-6"
         >
           <h2 className="font-display text-xl font-bold text-text mb-4">Upload Dokumen Baru</h2>
-          
+
           <div className="mb-6">
             <label className="block text-sm font-medium text-text mb-3">Tipe Dokumen</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -244,8 +224,17 @@ export default function Documents() {
           </div>
 
           <div className="flex justify-end gap-3 mt-6">
-            <button onClick={() => { setShowUpload(false); setSelectedFile(null); }} className="px-4 py-2 border border-border rounded-lg">Batal</button>
-            <button onClick={handleUpload} disabled={!selectedFile || uploading} className="px-4 py-2 bg-accent text-white rounded-lg disabled:opacity-50">
+            <button
+              onClick={() => { setShowUpload(false); setSelectedFile(null); }}
+              className="px-4 py-2 border border-border rounded-lg"
+            >
+              Batal
+            </button>
+            <button
+              onClick={handleUpload}
+              disabled={!selectedFile || uploading}
+              className="px-4 py-2 bg-accent text-white rounded-lg disabled:opacity-50"
+            >
               {uploading ? 'Uploading...' : 'Upload'}
             </button>
           </div>

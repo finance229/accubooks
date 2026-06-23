@@ -27,13 +27,21 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
     formData.append('folderId', DRIVE_FOLDER_ID);
     formData.append('subFolder', folder || 'documents');
 
+    // 🔥 PAKAI XMLHttpRequest (yang sudah terbukti berhasil sebelumnya)
     const xhr = new XMLHttpRequest();
     xhr.open('POST', GAS_UPLOAD_URL, true);
-    xhr.withCredentials = false;
-
+    
     xhr.onload = function () {
       try {
-        const result = JSON.parse(xhr.responseText);
+        // Response dari GAS sekarang pakai callback
+        let responseText = xhr.responseText;
+        // Hapus callback wrapper: callback({...})
+        const jsonMatch = responseText.match(/callback\((.*)\)/);
+        if (jsonMatch) {
+          responseText = jsonMatch[1];
+        }
+        const result = JSON.parse(responseText);
+        
         if (result.success) {
           resolve({
             success: true,

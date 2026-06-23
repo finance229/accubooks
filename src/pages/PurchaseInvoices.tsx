@@ -15,6 +15,7 @@ import {
   getLiabilityAccounts
 } from '../lib/accountingHelpers';
 import AgingModal from '../components/AgingModal';
+import { uploadToGoogleDrive } from '../lib/googleDrive';
 
 type Vendor = {
   id: number;
@@ -89,11 +90,9 @@ export default function PurchaseInvoices() {
   const [includePpn, setIncludePpn] = useState(true);
   const [includePph, setIncludePph] = useState(false);
   
-  // Modal vendor baru
   const [showNewVendorModal, setShowNewVendorModal] = useState(false);
   const [newVendor, setNewVendor] = useState({ name: '', npwp: '', phone: '', email: '', address: '', bank_name: '', bank_account: '' });
   
-  // Modal proyek baru
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
@@ -210,7 +209,6 @@ export default function PurchaseInvoices() {
         newVendor.bank_account
       );
       await fetchVendors();
-      const vendor = vendors.find(v => v.id === vendorId) || { name: newVendor.name, npwp: '', address: '' };
       setFormData({ 
         ...formData, 
         vendor_id: vendorId, 
@@ -250,19 +248,6 @@ export default function PurchaseInvoices() {
     }
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
   const handleCreateInvoice = async () => {
     if (!formData.vendor_id || !formData.invoice_number || formData.amount <= 0) {
       alert('Lengkapi vendor, nomor invoice, dan jumlah');
@@ -275,27 +260,12 @@ export default function PurchaseInvoices() {
     if (!currentCompany?.id) return;
 
     setUploading(true);
-    
-    // Upload ke Google Drive
-    const gasUrl = import.meta.env.VITE_GAS_UPLOAD_URL;
-    const folderId = import.meta.env.VITE_DRIVE_FOLDER_ID;
-    
-    const base64 = await fileToBase64(attachmentFile);
-    const response = await fetch(gasUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        fileName: attachmentFile.name,
-        fileData: base64,
-        mimeType: attachmentFile.type,
-        folderId: folderId,
-        subFolder: 'vendor_invoices',
-      }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const result = await response.json();
-    
-    if (!result.success) {
-      alert('Gagal upload bukti: ' + result.error);
+
+    // ✅ Pakai uploadToGoogleDrive via proxy, bukan fetch langsung ke GAS
+    const uploadResult = await uploadToGoogleDrive(attachmentFile, 'vendor_invoices');
+
+    if (!uploadResult.success) {
+      alert('Gagal upload bukti: ' + uploadResult.error);
       setUploading(false);
       return;
     }
@@ -324,7 +294,7 @@ export default function PurchaseInvoices() {
         pph23: pph23,
         total: total,
         status: 'draft',
-        attachment_url: result.fileUrl,
+        attachment_url: uploadResult.fileUrl,
         created_by: user?.email,
       }]);
 
@@ -417,7 +387,6 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Dapatkan akun default
     const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
     const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
     const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
@@ -428,7 +397,6 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Siapkan entries jurnal
     const entries = [
       {
         account_id: debitAcc.id,
@@ -467,14 +435,12 @@ export default function PurchaseInvoices() {
       credit: selectedInvoice.total,
     });
 
-    // Generate voucher number
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ';
     const count = invoices.filter(i => i.status === 'verified' || i.status === 'paid').length + 1;
     const voucherNo = `AP/${year}/${month}/${projectCode}/${String(count).padStart(4, '0')}`;
 
-    // Buat jurnal
     const journalId = await createGeneralJournal(
       currentCompany!.id,
       selectedInvoice.invoice_date,
@@ -491,13 +457,11 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Update project spent
     await supabase
       .from('projects')
       .update({ spent: (projects.find(p => p.id === verifyData.projectId)?.spent || 0) + selectedInvoice.total })
       .eq('id', verifyData.projectId);
 
-    // Update invoice
     const { error } = await supabase
       .from('vendor_invoices')
       .update({
@@ -544,7 +508,6 @@ export default function PurchaseInvoices() {
     const newPaid = currentPaid + amount;
     const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
 
-    // Dapatkan akun
     const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
     const bankAccount = bankAccounts.find(b => b.id === creditAccountId);
     
@@ -553,7 +516,6 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Buat jurnal pembayaran
     const entries = [
       {
         account_id: payableAcc.id,
@@ -587,7 +549,6 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Update invoice
     const { error } = await supabase
       .from('vendor_invoices')
       .update({
@@ -616,33 +577,21 @@ export default function PurchaseInvoices() {
     }
   };
 
-  // ========== AGING REPORT ==========
   const calculateAgingAP = (invoice: PurchaseInvoice) => {
     const today = new Date();
     const dueDate = new Date(invoice.due_date);
     const diffTime = today.getTime() - dueDate.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
     if (invoice.status === 'paid') return null;
-    
     const remaining = invoice.total - (invoice.paid_amount || 0);
     if (remaining <= 0) return null;
-    
     let agingCategory = '';
     if (diffDays <= 0) agingCategory = 'Belum Jatuh Tempo';
     else if (diffDays <= 30) agingCategory = '1-30 Hari';
     else if (diffDays <= 60) agingCategory = '31-60 Hari';
     else if (diffDays <= 90) agingCategory = '61-90 Hari';
     else agingCategory = '> 90 Hari';
-    
-    return {
-      vendor: invoice.vendor_name,
-      invoice: invoice.invoice_number,
-      dueDate: invoice.due_date,
-      remaining: remaining,
-      agingCategory: agingCategory,
-      diffDays: diffDays,
-    };
+    return { vendor: invoice.vendor_name, invoice: invoice.invoice_number, dueDate: invoice.due_date, remaining, agingCategory, diffDays };
   };
 
   const getAgingDataAP = () => {
@@ -653,7 +602,6 @@ export default function PurchaseInvoices() {
       '61-90 Hari': { count: 0, total: 0, items: [] as any[] },
       '> 90 Hari': { count: 0, total: 0, items: [] as any[] },
     };
-    
     invoices.forEach(inv => {
       const result = calculateAgingAP(inv);
       if (result && agingData[result.agingCategory]) {
@@ -662,7 +610,6 @@ export default function PurchaseInvoices() {
         agingData[result.agingCategory].items.push(result);
       }
     });
-    
     return agingData;
   };
 
@@ -713,15 +660,8 @@ export default function PurchaseInvoices() {
           <p className="text-xs text-text-muted mt-1">Staff → Finance (Verifikasi & Pilih Akun) → Direktur (Bayar)</p>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={() => setShowAgingModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 border border-accent text-accent rounded-lg hover:bg-accent/5 transition-colors"
-          >
-            📊 Aging Report
-          </button>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
-            <Plus className="w-5 h-5" /> Buat AP
-          </button>
+          <button onClick={() => setShowAgingModal(true)} className="flex items-center gap-2 px-4 py-2.5 border border-accent text-accent rounded-lg hover:bg-accent/5 transition-colors">📊 Aging Report</button>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30"><Plus className="w-5 h-5" /> Buat AP</button>
         </div>
       </div>
 
@@ -779,7 +719,6 @@ export default function PurchaseInvoices() {
         </div>
       </div>
 
-      {/* Modal Buat AP */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8">
@@ -793,11 +732,7 @@ export default function PurchaseInvoices() {
                     {showVendorDropdown && filteredVendors.length > 0 && (
                       <div className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-48 overflow-auto">
                         {filteredVendors.map(v => (
-                          <button key={v.id} className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { 
-                            setFormData({ ...formData, vendor_id: v.id, vendor_name: v.name, vendor_npwp: v.npwp || '', vendor_address: v.address || '' }); 
-                            setVendorSearch(v.name); 
-                            setShowVendorDropdown(false); 
-                          }}>{v.name}</button>
+                          <button key={v.id} className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { setFormData({ ...formData, vendor_id: v.id, vendor_name: v.name, vendor_npwp: v.npwp || '', vendor_address: v.address || '' }); setVendorSearch(v.name); setShowVendorDropdown(false); }}>{v.name}</button>
                         ))}
                       </div>
                     )}
@@ -818,7 +753,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Verifikasi */}
       {showVerifyModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8">
@@ -859,7 +793,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Pembayaran */}
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -886,7 +819,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Detail */}
       {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
@@ -910,7 +842,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Vendor Baru */}
       {showNewVendorModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -932,7 +863,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Modal Proyek Baru */}
       {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -950,7 +880,6 @@ export default function PurchaseInvoices() {
         </div>
       )}
 
-      {/* Aging Modal */}
       {showAgingModal && (
         <AgingModal
           isOpen={showAgingModal}

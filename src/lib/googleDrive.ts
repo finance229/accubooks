@@ -1,5 +1,6 @@
 // src/lib/googleDrive.ts
-import { supabase } from './supabase';
+const GAS_URL = import.meta.env.VITE_GAS_UPLOAD_URL || '';
+const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
 
 export type UploadResult = {
   success: boolean;
@@ -11,36 +12,44 @@ export type UploadResult = {
 
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
   try {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${folder || 'documents'}/${Date.now()}.${fileExt}`;
-    
-    console.log('📤 Uploading to Supabase Storage...');
-    
-    const { data, error } = await supabase.storage
-      .from('accubooks')
-      .upload(fileName, file);
+    // Convert file ke base64
+    const base64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(',')[1]);
+      };
+      reader.readAsDataURL(file);
+    });
 
-    if (error) {
-      console.error('❌ Upload error:', error);
-      return { success: false, error: error.message };
-    }
+    const formData = new FormData();
+    formData.append('fileData', base64);
+    formData.append('fileName', file.name);
+    formData.append('mimeType', file.type);
+    formData.append('folderId', DRIVE_FOLDER_ID);
+    formData.append('subFolder', folder || 'documents');
 
-    const { data: urlData } = supabase.storage
-      .from('accubooks')
-      .getPublicUrl(data.path);
+    console.log('📤 Uploading to GAS...');
 
-    console.log('✅ Upload success:', urlData.publicUrl);
-    
+    // 🔥 PAKAI mode: 'no-cors' biar ga ada preflight
+    const response = await fetch(GAS_URL, {
+      method: 'POST',
+      mode: 'no-cors',  // ← INI KUNCI!
+      body: formData,
+    });
+
+    console.log('✅ Upload initiated (check Google Drive)');
+
     return {
       success: true,
-      fileUrl: urlData.publicUrl,
+      fileUrl: `Uploaded: ${file.name} (check Google Drive)`,
       fileName: file.name,
     };
   } catch (error) {
     console.error('❌ Upload error:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Upload failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }

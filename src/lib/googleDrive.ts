@@ -1,6 +1,5 @@
 // src/lib/googleDrive.ts
 const API_URL = '/api/upload';
-const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
 
 export type UploadResult = {
   success: boolean;

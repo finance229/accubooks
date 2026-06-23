@@ -35,9 +35,6 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
     const response = await fetch(GAS_URL, {
       method: 'POST',
       mode: 'no-cors',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
       body: params.toString(),
     });
 

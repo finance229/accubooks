@@ -30,15 +30,9 @@ export default async function handler(req, res) {
       body: gasFormData,
     });
 
-    if (!gasResponse.ok) {
-      const errorText = await gasResponse.text();
-      throw new Error(`GAS Error ${gasResponse.status}: ${errorText}`);
-    }
-
     const result = await gasResponse.json();
     res.status(200).json(result);
   } catch (error) {
-    console.error('Proxy error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 }

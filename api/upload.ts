@@ -1,4 +1,3 @@
-// api/upload.ts
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -7,6 +6,10 @@ export default async function handler(req: any, res: any) {
   try {
     const GAS_URL = process.env.GAS_UPLOAD_URL || '';
     const FOLDER_ID = process.env.DRIVE_FOLDER_ID || '';
+
+    // ← debug sementara
+    console.log('GAS_URL:', GAS_URL);
+    console.log('FOLDER_ID:', FOLDER_ID);
 
     const { fileData, fileName, mimeType, subFolder } = req.body;
 

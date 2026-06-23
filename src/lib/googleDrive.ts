@@ -12,7 +12,11 @@ export type UploadResult = {
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
   return new Promise((resolve) => {
     if (!GAS_UPLOAD_URL) {
-      resolve({ success: false, error: 'Google Apps Script URL not configured' });
+      resolve({ success: false, error: 'GAS URL not configured' });
+      return;
+    }
+    if (!DRIVE_FOLDER_ID) {
+      resolve({ success: false, error: 'Drive Folder ID not configured' });
       return;
     }
 
@@ -25,8 +29,9 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', GAS_UPLOAD_URL, true);
-    
-    xhr.onload = function() {
+    xhr.withCredentials = false;
+
+    xhr.onload = function () {
       try {
         const result = JSON.parse(xhr.responseText);
         if (result.success) {
@@ -43,16 +48,16 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
         resolve({ success: false, error: 'Invalid response from server' });
       }
     };
-    
-    xhr.onerror = function() {
+
+    xhr.onerror = function () {
       resolve({ success: false, error: 'Network error' });
     };
-    
-    xhr.ontimeout = function() {
+
+    xhr.ontimeout = function () {
       resolve({ success: false, error: 'Upload timeout' });
     };
-    
-    xhr.timeout = 60000; // 60 seconds
+
+    xhr.timeout = 60000;
     xhr.send(formData);
   });
 }

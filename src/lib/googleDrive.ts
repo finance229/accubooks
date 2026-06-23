@@ -1,6 +1,6 @@
 // src/lib/googleDrive.ts
-const GAS_URL = import.meta.env.VITE_GAS_UPLOAD_URL || 'https://script.google.com/macros/s/AKfycbzlCNVE8qafhwCkB5-kHsS4hx9UmpEwwqk0TuCWNt0CRTEML3tWVzm4qKX3Ybrmv_KHAw/exec';
-const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '15OqEW00HkWJrBEJtPnNPV5jwaMZ24wik';
+const GAS_URL = import.meta.env.VITE_GAS_UPLOAD_URL || 'https://script.google.com/macros/s/AKfycbzXoR8IaDvRqfpjL3OpO2nxNYkqNGlLy6GnuEi3cDrbS66_QZwfdNSwUsgMgTZScPhNSQ/exec';
+const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '	15OqEW00HkWJrBEJtPnNPV5jwaMZ24wik';
 
 export type UploadResult = {
   success: boolean;
@@ -22,23 +22,26 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
       reader.readAsDataURL(file);
     });
 
-    const formData = new FormData();
-    formData.append('fileData', base64);
-    formData.append('fileName', file.name);
-    formData.append('folderId', DRIVE_FOLDER_ID);
-    formData.append('subFolder', folder || 'documents');
+    const payload = {
+      fileData: base64,
+      fileName: file.name,
+      folderId: DRIVE_FOLDER_ID,
+      subFolder: folder || 'documents',
+    };
 
-    console.log('📤 Uploading to GAS...');
+    console.log('📤 Uploading to GAS via JSON...');
 
     const response = await fetch(GAS_URL, {
       method: 'POST',
       mode: 'no-cors', // 🔥 INI KUNCI!
-      body: formData,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
 
     // Karena mode no-cors, response tidak bisa dibaca
-    // Tapi kita asumsikan sukses karena tidak ada error
-    console.log('✅ Upload initiated');
+    console.log('✅ Upload initiated (check Google Drive)');
 
     return {
       success: true,

@@ -22,6 +22,7 @@
     "tailwindcss": "^4.0.0-alpha.6",
     "@tailwindcss/vite": "^4.0.0-alpha.6",
     "typescript": "^5.2.2",
-    "vite": "^5.0.8"
+    "vite": "^5.0.8",
+    "@vercel/node": "^3.0.0"
   }
 }

@@ -1,11 +1,10 @@
-// api/upload.ts
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const GAS_URL = process.env.VITE_GAS_UPLOAD_URL || '';
+    const GAS_URL = process.env.GAS_UPLOAD_URL || ''; // ← tanpa VITE_
     const { fileData, fileName, mimeType, folderId, subFolder } = req.body;
 
     const params = new URLSearchParams();

@@ -21,29 +21,12 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
       body: formData,
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-
-    return await response.json();
+    const result = await response.json();
+    return result;
   } catch (error) {
-    console.error('Upload error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
-}
-
-export function getGoogleDrivePreviewUrl(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/preview`;
-}
-
-export function getGoogleDriveDownloadUrl(fileId: string): string {
-  return `https://drive.google.com/uc?export=download&id=${fileId}`;
-}
-
-export function openGoogleDriveFile(fileId: string): void {
-  window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
 }

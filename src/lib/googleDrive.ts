@@ -1,3 +1,15 @@
+// src/lib/googleDrive.ts
+const GAS_URL = import.meta.env.VITE_GAS_UPLOAD_URL || '';
+const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID || '';
+
+export type UploadResult = {
+  success: boolean;
+  fileId?: string;
+  fileUrl?: string;
+  fileName?: string;
+  error?: string;
+};
+
 export async function uploadToGoogleDrive(file: File, folder?: string): Promise<UploadResult> {
   try {
     const base64 = await new Promise<string>((resolve) => {
@@ -17,7 +29,6 @@ export async function uploadToGoogleDrive(file: File, folder?: string): Promise<
       subFolder: folder || 'documents',
     };
 
-    // ✅ Fetch ke /api/upload (Vercel proxy), bukan langsung ke GAS
     const response = await fetch('/api/upload', {
       method: 'POST',
       headers: {

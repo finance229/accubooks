@@ -68,60 +68,44 @@ export default function Documents() {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
-    if (!currentCompany?.id) return;
+  if (!selectedFile) return;
+  if (!currentCompany?.id) return;
 
-    setUploading(true);
+  setUploading(true);
+  
+  try {
+    // ✅ Pakai uploadToGoogleDrive, bukan fetch langsung ke GAS
+    const result = await uploadToGoogleDrive(selectedFile, selectedType);
     
-    try {
-      const gasUrl = import.meta.env.VITE_GAS_UPLOAD_URL;
-      const folderId = import.meta.env.VITE_DRIVE_FOLDER_ID;
+    if (result.success) {
+      const { data, error } = await supabase
+        .from('documents')
+        .insert([{
+          company_id: currentCompany.id,
+          name: selectedFile.name,
+          type: selectedType,
+          file_id: result.fileId,
+          file_url: result.fileUrl,
+          mime_type: selectedFile.type,
+          size_bytes: selectedFile.size,
+        }])
+        .select();
       
-      const base64Data = await fileToBase64(selectedFile);
-      
-      const response = await fetch(gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({
-          fileName: selectedFile.name,
-          fileData: base64Data,
-          mimeType: selectedFile.type,
-          folderId: folderId,
-          subFolder: selectedType,
-        }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        const { data, error } = await supabase
-          .from('documents')
-          .insert([{
-            company_id: currentCompany.id,
-            name: selectedFile.name,
-            type: selectedType,
-            file_id: result.fileId,
-            file_url: result.fileUrl,
-            mime_type: selectedFile.type,
-            size_bytes: selectedFile.size,
-          }])
-          .select();
-        
-        if (!error && data) {
-          setDocuments([data[0], ...documents]);
-          setShowUpload(false);
-          setSelectedFile(null);
-        }
-      } else {
-        alert('Gagal upload: ' + (result.error || 'Unknown error'));
+      if (!error && data) {
+        setDocuments([data[0], ...documents]);
+        setShowUpload(false);
+        setSelectedFile(null);
       }
-    } catch (error) {
-      console.error('Upload error:', error);
-      alert('Gagal upload file');
-    } finally {
-      setUploading(false);
+    } else {
+      alert('Gagal upload: ' + (result.error || 'Unknown error'));
     }
-  };
+  } catch (error) {
+    console.error('Upload error:', error);
+    alert('Gagal upload file');
+  } finally {
+    setUploading(false);
+  }
+};
 
   const handleDelete = async (id: string) => {
     if (confirm('Yakin ingin menghapus dokumen ini?')) {

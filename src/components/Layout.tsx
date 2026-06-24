@@ -88,7 +88,7 @@ const menuGroups: MenuGroup[] = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Akuntansi & Keuangan', 'Piutang & Hutang', 'Manajemen', 'Laporan']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set([]));
   const { user, signOut } = useAuth();
   const { currentCompany } = useCompany();
   const navigate = useNavigate();

@@ -28,19 +28,24 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
       totalSubtotal += itemTotal;
       const additionalText = item.additional || '';
       
+      // 🔥 Tambahan hanya muncul kalau diisi
+      const additionalHtml = additionalText 
+        ? `<br><span style="font-size: 10px; color: #666; font-style: italic;">${additionalText}</span>` 
+        : '';
+      
       itemsHtml += `
         <tr>
-          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; vertical-align: top;">
+          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; vertical-align: top; width: 45%;">
             <strong>${item.description || 'Item ' + (index + 1)}</strong>
-            ${additionalText ? `<br><span style="font-size: 10px; color: #666;">${additionalText}</span>` : ''}
+            ${additionalHtml}
           </td>
-          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: right; vertical-align: top;">
+          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: right; vertical-align: top; width: 20%;">
             ${formatRupiah(itemTotal)}
           </td>
-          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: center; vertical-align: top;">
+          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: center; vertical-align: top; width: 15%;">
             ${qty}
           </td>
-          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: right; vertical-align: top;">
+          <td style="padding: 8px 0; font-size: 11px; border-bottom: 1px solid #eee; text-align: right; vertical-align: top; width: 20%;">
             ${formatRupiah(itemTotal)}
           </td>
         </tr>

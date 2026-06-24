@@ -26,7 +26,7 @@ import {
   LineElement,
   Filler,
 } from 'chart.js';
-import { Bar, Line, Doughnut, HorizontalBar } from 'react-chartjs-2';
+import { Bar, Line, Doughnut } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
@@ -882,25 +882,34 @@ export default function Dashboard() {
               <h3 className="font-display font-bold text-text mb-4">Kategori Transaksi</h3>
               <div className="h-52">
                 {kategoriTransaksi && Object.keys(kategoriTransaksi).length > 0 && (
-                  <HorizontalBar
-                    data={{
-                      labels: Object.keys(kategoriTransaksi),
-                      datasets: [
-                        {
-                          label: 'Jumlah',
-                          data: Object.values(kategoriTransaksi),
-                          backgroundColor: 'rgba(99, 102, 241, 0.7)',
-                        },
-                      ],
-                    }}
-                    options={{
-                      ...barOptions,
-                      indexAxis: 'y' as const,
-                      plugins: {
-                        legend: { display: false },
-                      },
-                    }}
-                  />
+                  <Bar
+  data={{
+    labels: Object.keys(kategoriTransaksi),
+    datasets: [
+      {
+        label: 'Jumlah',
+        data: Object.values(kategoriTransaksi),
+        backgroundColor: 'rgba(99, 102, 241, 0.7)',
+      },
+    ],
+  }}
+  options={{
+    indexAxis: 'y' as const,
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+    },
+    scales: {
+      x: {
+        beginAtZero: true,
+        ticks: {
+          callback: (value: any) => `Rp ${(value / 1000000).toFixed(0)}J`,
+        },
+      },
+    },
+  }}
+/>
                 )}
               </div>
             </div>

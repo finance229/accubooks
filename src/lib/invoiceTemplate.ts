@@ -16,7 +16,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // 🔥 LOOP ITEMS DAN TAMPILKAN
+  // 🔥 LOOP ITEMS
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -28,19 +28,13 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
       totalSubtotal += itemTotal;
       const additionalText = item.additional || '';
       
-      // Additional hanya muncul kalau diisi
-      const additionalHtml = additionalText 
-        ? `<span class="additional-text">${additionalText}</span>` 
-        : '';
-      
       itemsHtml += `
         <tr>
           <td style="padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; width: 35%;">
             <strong>${item.description || 'Item ' + (index + 1)}</strong>
-            ${additionalHtml}
           </td>
           <td style="padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; width: 25%;">
-            ${additionalText ? additionalText : '-'}
+            ${additionalText || '-'}
           </td>
           <td style="padding: 8px 10px; border-bottom: 1px solid #eee; text-align: center; vertical-align: top; width: 15%;">
             ${qty}
@@ -91,13 +85,6 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
     table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
-    .additional-text {
-      display: block;
-      font-size: 10px;
-      color: #666;
-      font-style: italic;
-      margin-top: 2px;
-    }
     .total-row { display: flex; justify-content: flex-end; align-items: center; gap: 30px; margin-top: 10px; padding-top: 10px; border-top: 2px solid #000; }
     .total-row .label { font-size: 14px; font-weight: 600; }
     .total-row .amount { font-size: 20px; font-weight: 700; }
@@ -117,6 +104,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
 </head>
 <body>
   <div class="invoice">
+
     <!-- HEADER -->
     <div class="header">
       <div class="header-left">
@@ -146,7 +134,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
       </div>
     </div>
 
-    <!-- TABLE ITEMS -->
+    <!-- TABLE ITEMS (DESCRIPTION | ADDITIONAL | QTY | TOTAL) -->
     <div class="table-wrap">
       <table>
         <thead>
@@ -222,6 +210,7 @@ export function generateInvoiceHTML(invoice: any, company: any, customer: any, i
         <div class="date">${formatDate(new Date().toISOString())}</div>
       </div>
     </div>
+
   </div>
 </body>
 </html>`;

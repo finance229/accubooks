@@ -90,6 +90,11 @@ export default function PurchaseInvoices() {
   const [includePpn, setIncludePpn] = useState(true);
   const [includePph, setIncludePph] = useState(false);
   
+  // 🆕 STATE UNTUK COMPANY CODE DAN PREVIEW VOUCHER
+  const [companyCode, setCompanyCode] = useState<string>('');
+  const [voucherPreview, setVoucherPreview] = useState<string>('');
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
+  
   const [showNewVendorModal, setShowNewVendorModal] = useState(false);
   const [newVendor, setNewVendor] = useState({ name: '', npwp: '', phone: '', email: '', address: '', bank_name: '', bank_account: '' });
   
@@ -128,6 +133,91 @@ export default function PurchaseInvoices() {
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [creditAccountId, setCreditAccountId] = useState(0);
 
+  // ============================================
+  // 🆕 FETCH COMPANY CODE
+  // ============================================
+  useEffect(() => {
+    if (currentCompany?.id) {
+      fetchCompanyCode();
+    }
+  }, [currentCompany]);
+
+  const fetchCompanyCode = async () => {
+    if (!currentCompany?.id) return;
+    const { data } = await supabase
+      .from('companies')
+      .select('code')
+      .eq('id', currentCompany.id)
+      .single();
+    if (data) {
+      setCompanyCode(data.code);
+    }
+  };
+
+  // ============================================
+  // 🆕 GENERATE PREVIEW VOUCHER OTOMATIS
+  // ============================================
+  const generateVoucherPreview = async () => {
+    if (!currentCompany?.id || !companyCode) {
+      setVoucherPreview('');
+      return;
+    }
+
+    setIsGeneratingPreview(true);
+
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      
+      // Ambil project code dari state verifyData atau formData
+      const projectId = verifyData.projectId || formData.project_id;
+      const project = projects.find(p => p.id === projectId);
+      const projectCode = project?.code || '';
+
+      // Base pattern: COMPANY/YEAR/MONTH[/PROJECT]
+      let basePattern = `${companyCode}/${year}/${month}`;
+      if (projectCode) {
+        basePattern += `/${projectCode}`;
+      }
+
+      // Cari nomor terakhir dari database
+      const { data: existingVouchers } = await supabase
+        .from('vendor_invoices')
+        .select('voucher_no')
+        .ilike('voucher_no', `${basePattern}/%`)
+        .order('voucher_no', { ascending: false })
+        .limit(1);
+
+      let lastNumber = 0;
+      if (existingVouchers && existingVouchers.length > 0) {
+        const parts = existingVouchers[0].voucher_no.split('/');
+        const lastPart = parts[parts.length - 1];
+        lastNumber = parseInt(lastPart) || 0;
+      }
+
+      const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+      const preview = `${basePattern}/${nextNumber}`;
+      
+      setVoucherPreview(preview);
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      setVoucherPreview('(gagal generate)');
+    } finally {
+      setIsGeneratingPreview(false);
+    }
+  };
+
+  // 🆕 Auto-generate preview saat project atau company berubah
+  useEffect(() => {
+    if (companyCode) {
+      generateVoucherPreview();
+    }
+  }, [companyCode, verifyData.projectId, formData.project_id, projects]);
+
+  // ============================================
+  // DATA FETCHING
+  // ============================================
   useEffect(() => {
     if (currentCompany?.id) {
       fetchInvoices();
@@ -261,7 +351,6 @@ export default function PurchaseInvoices() {
 
     setUploading(true);
 
-    // ✅ Pakai uploadToGoogleDrive via proxy, bukan fetch langsung ke GAS
     const uploadResult = await uploadToGoogleDrive(attachmentFile, 'vendor_invoices');
 
     if (!uploadResult.success) {
@@ -372,6 +461,9 @@ export default function PurchaseInvoices() {
     } else setBudgetInfo(null);
   };
 
+  // ============================================
+  // 🆕 HANDLE VERIFY DENGAN SKEMA VOUCHER BARU
+  // ============================================
   const handleVerify = async () => {
     if (!selectedInvoice) return;
     if (!verifyData.projectId) {
@@ -387,6 +479,39 @@ export default function PurchaseInvoices() {
       return;
     }
 
+    // 🔴 GENERATE VOUCHER NO (SAMA PERSIS DENGAN PREVIEW)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const project = projects.find(p => p.id === verifyData.projectId);
+    const projectCode = project?.code || '';
+
+    let basePattern = `${companyCode}/${year}/${month}`;
+    if (projectCode) {
+      basePattern += `/${projectCode}`;
+    }
+
+    // Cari nomor terakhir (pakai query yang sama)
+    const { data: existingVouchers } = await supabase
+      .from('vendor_invoices')
+      .select('voucher_no')
+      .ilike('voucher_no', `${basePattern}/%`)
+      .order('voucher_no', { ascending: false })
+      .limit(1);
+
+    let lastNumber = 0;
+    if (existingVouchers && existingVouchers.length > 0) {
+      const parts = existingVouchers[0].voucher_no.split('/');
+      const lastPart = parts[parts.length - 1];
+      lastNumber = parseInt(lastPart) || 0;
+    }
+
+    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+    const voucherNo = `${basePattern}/${nextNumber}`;
+
+    console.log('📝 Voucher Generated:', voucherNo);
+
+    // 🔴 LANJUTKAN VERIFIKASI
     const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
     const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
     const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
@@ -435,12 +560,6 @@ export default function PurchaseInvoices() {
       credit: selectedInvoice.total,
     });
 
-    const year = new Date().getFullYear();
-    const month = String(new Date().getMonth() + 1).padStart(2, '0');
-    const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || 'PRJ';
-    const count = invoices.filter(i => i.status === 'verified' || i.status === 'paid').length + 1;
-    const voucherNo = `AP/${year}/${month}/${projectCode}/${String(count).padStart(4, '0')}`;
-
     const journalId = await createGeneralJournal(
       currentCompany!.id,
       selectedInvoice.invoice_date,
@@ -468,7 +587,7 @@ export default function PurchaseInvoices() {
         status: 'verified',
         project_id: verifyData.projectId,
         debit_account_id: verifyData.debitAccountId,
-        voucher_no: voucherNo,
+        voucher_no: voucherNo, // 🆕 VOUCHER SESUAI SKEMA
         verified_by: user?.email,
         verified_at: new Date().toISOString(),
       })
@@ -477,7 +596,7 @@ export default function PurchaseInvoices() {
     if (error) {
       alert('Gagal verifikasi: ' + error.message);
     } else {
-      alert('AP berhasil diverifikasi. Jurnal hutang telah dibuat.');
+      alert(`✅ AP berhasil diverifikasi!\nVoucher: ${voucherNo}`);
       setShowVerifyModal(false);
       fetchInvoices();
     }
@@ -766,24 +885,59 @@ export default function PurchaseInvoices() {
                 <p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p>
                 <a href={selectedInvoice.attachment_url} target="_blank" className="text-blue-600 text-sm">Lihat Invoice Vendor</a>
               </div>
+              
               <div>
                 <label className="block font-medium">Pilih Proyek</label>
                 <div className="flex gap-2">
-                  <select value={verifyData.projectId} onChange={e => handleProjectChange(parseInt(e.target.value))} className="flex-1 px-4 py-2 border rounded-lg">
+                  <select 
+                    value={verifyData.projectId} 
+                    onChange={e => handleProjectChange(parseInt(e.target.value))} 
+                    className="flex-1 px-4 py-2 border rounded-lg"
+                  >
                     <option value={0}>-- Tidak Ada Proyek --</option>
-                    {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})</option>))}
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.code} - {p.name} (Budget: {formatCurrency(p.budget)}, Sisa: {formatCurrency(p.budget - p.spent)})
+                      </option>
+                    ))}
                   </select>
-                  <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button>
+                  <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5">+ Baru</button>
                 </div>
               </div>
+
+              {/* 🆕 PREVIEW VOUCHER - OTOMATIS BERUBAH SAAT PROJECT BERUBAH */}
+              <div>
+                <label className="block font-medium">Preview Voucher</label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    value={isGeneratingPreview ? 'Loading...' : voucherPreview} 
+                    readOnly 
+                    className="flex-1 px-4 py-2 border rounded-lg bg-gray-50 font-mono text-sm"
+                  />
+                </div>
+                <p className="text-xs text-text-muted mt-1">
+                  Voucher akan digenerate otomatis saat verifikasi
+                </p>
+              </div>
+
               <div>
                 <label className="block font-medium">Akun Debit (Beban/Persediaan/Aset)</label>
                 <select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
                   <option value={0}>-- Pilih Akun --</option>
-                  {coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name} ({acc.type === 'expense' ? 'Beban' : 'Aset'})</option>))}
+                  {coaList.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.code} - {acc.name} ({acc.type === 'expense' ? 'Beban' : 'Aset'})
+                    </option>
+                  ))}
                 </select>
               </div>
-              {budgetInfo && (<div className={`p-3 rounded-lg ${budgetInfo.sufficient ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{budgetInfo.message}</div>)}
+
+              {budgetInfo && (
+                <div className={`p-3 rounded-lg ${budgetInfo.sufficient ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                  {budgetInfo.message}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowVerifyModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>

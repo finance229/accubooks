@@ -1,3 +1,4 @@
+```tsx
 import { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -14,6 +15,7 @@ import {
   generateInvoiceNo
 } from '../lib/accountingHelpers';
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
+import { generateKwitansiHTML } from '../lib/kwitansiTemplate';
 import AgingModal from '../components/AgingModal';
 
 type Invoice = {
@@ -468,6 +470,47 @@ const invoiceNumber = await generateInvoiceNo(
     }
   };
 
+  // ============================================
+  // CETAK KWITANSI
+  // ============================================
+  const handlePrintKwitansi = async (invoice: Invoice) => {
+    try {
+      const { data: items } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoice.id);
+      
+      const { data: company } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', currentCompany?.id)
+        .single();
+      
+      const { data: customer } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('id', invoice.customer_id)
+        .single();
+      
+      const { data: payments } = await supabase
+        .from('invoice_payments')
+        .select('*')
+        .eq('invoice_id', invoice.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      const payment = payments?.[0] || null;
+      
+      const html = generateKwitansiHTML(invoice, company, customer, items || [], payment);
+      const win = window.open('', '_blank');
+      win?.document.write(html);
+      win?.document.close();
+    } catch (error) {
+      console.error('Error printing kwitansi:', error);
+      alert('Gagal cetak kwitansi');
+    }
+  };
+
   const handleSendEmail = async (invoice: Invoice) => {
     try {
       const { data: customer } = await supabase
@@ -656,6 +699,16 @@ const invoiceNumber = await generateInvoiceNo(
                         {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
                         <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
                         <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><Send className="w-4 h-4" /></button>
+                        {/* 🆕 TOMBOL KWITANSI - muncul saat status verified, partial, atau paid */}
+                        {(invoice.status === 'verified' || invoice.status === 'partial' || invoice.status === 'paid') && (
+                          <button
+                            onClick={() => handlePrintKwitansi(invoice)}
+                            className="p-2 text-text-muted hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Cetak Kwitansi"
+                          >
+                            🧾
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -723,3 +776,4 @@ const invoiceNumber = await generateInvoiceNo(
     </div>
   );
 }
+```

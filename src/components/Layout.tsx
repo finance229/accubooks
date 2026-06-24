@@ -19,15 +19,24 @@ type MenuItem = {
 type MenuGroup = {
   name: string;
   icon: any;
-  items: MenuItem[];
+  items?: MenuItem[]; // items jadi optional
+  isSingle?: boolean; // flag untuk single link
+  to?: string; // untuk single link
 };
 
 const menuGroups: MenuGroup[] = [
+  // ============================================
+  // DASHBOARD - SINGLE LINK (LANGSUNG, TANPA DROPDOWN)
+  // ============================================
   {
     name: 'Dashboard',
     icon: LayoutDashboard,
-    items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard }]
+    isSingle: true,
+    to: '/dashboard',
   },
+  // ============================================
+  // MENU LAINNYA (TETAP DENGAN DROPDOWN)
+  // ============================================
   {
     name: 'Akuntansi & Keuangan',
     icon: Database,
@@ -65,7 +74,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { name: 'Laba Rugi', to: '/income-statement', icon: TrendingUp },
       { name: 'Neraca', to: '/balance-sheet', icon: BarChart3 },
-      { name: 'Laporan Umum', to: '/reports', icon: FileText },
+      { name: 'Pajak & Cashflow', to: '/reports-general', icon: FileText },
     ]
   },
   {
@@ -79,7 +88,7 @@ const menuGroups: MenuGroup[] = [
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Dashboard', 'Akuntansi & Keuangan', 'Piutang & Hutang']));
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Akuntansi & Keuangan', 'Piutang & Hutang', 'Manajemen', 'Laporan']));
   const { user, signOut } = useAuth();
   const { currentCompany } = useCompany();
   const navigate = useNavigate();
@@ -122,8 +131,39 @@ export default function Layout() {
           {/* NAVIGATION */}
           <nav className="flex-1 px-4 py-6 overflow-y-auto">
             {menuGroups.map((group) => {
-              const isExpanded = expandedGroups.has(group.name);
               const Icon = group.icon;
+              
+              // ============================================
+              // SINGLE LINK (Dashboard)
+              // ============================================
+              if (group.isSingle && group.to) {
+                return (
+                  <div key={group.name} className="mb-2">
+                    <NavLink
+                      to={group.to}
+                      onClick={() => setSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                          isActive
+                            ? 'bg-accent text-white shadow-lg shadow-accent/30'
+                            : 'text-white/70 hover:text-white hover:bg-sidebar-hover'
+                        }`
+                      }
+                    >
+                      <Icon className="w-5 h-5" />
+                      <span>{group.name}</span>
+                    </NavLink>
+                  </div>
+                );
+              }
+              
+              // ============================================
+              // GROUP WITH DROPDOWN
+              // ============================================
+              const isExpanded = expandedGroups.has(group.name);
+              const hasItems = group.items && group.items.length > 0;
+              
+              if (!hasItems) return null;
               
               return (
                 <div key={group.name} className="mb-2">

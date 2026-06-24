@@ -129,27 +129,27 @@ export default function Dashboard() {
       const companyId = currentCompany.id;
       const [year, month] = selectedMonth.split('-').map(Number);
 
-      // 1. SUMMARY
-      const summaryData = await fetchSummary(companyId, year, month);
+      // 1. SUMMARY dari JURNAL
+      const summaryData = await fetchSummaryFromJournal(companyId, year, month);
       setSummary(summaryData);
 
-      // 2. TREND (6 bulan)
-      const trend = await fetchTrendData(companyId, year, month);
+      // 2. TREND (6 bulan) dari JURNAL
+      const trend = await fetchTrendFromJournal(companyId, year, month);
       setTrendData(trend);
 
-      // 3. AGING
+      // 3. AGING dari INVOICES
       const aging = await fetchAgingData(companyId);
       setAgingData(aging);
 
-      // 4. STATUS PAYMENT
+      // 4. STATUS PAYMENT dari PAYMENT_REQUESTS
       const status = await fetchStatusPayment(companyId);
       setStatusPayment(status);
 
-      // 5. KATEGORI TRANSAKSI
-      const kategori = await fetchKategoriTransaksi(companyId, year, month);
+      // 5. KATEGORI TRANSAKSI dari JURNAL
+      const kategori = await fetchKategoriFromJournal(companyId, year, month);
       setKategoriTransaksi(kategori);
 
-      // 6. TRANSAKSI TERBARU
+      // 6. TRANSAKSI TERBARU dari JURNAL
       const transaksi = await fetchTransaksiTerbaru(companyId);
       setTransaksiTerbaru(transaksi);
 
@@ -167,93 +167,132 @@ export default function Dashboard() {
   };
 
   // ============================================
-  // FETCH FUNCTIONS
+  // 1. SUMMARY DARI JURNAL
   // ============================================
-  const fetchSummary = async (companyId: number, year: number, month: number) => {
+  const fetchSummaryFromJournal = async (companyId: number, year: number, month: number) => {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    // Data bulan ini
-    const { data: txCurrent } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('company_id', companyId)
-      .gte('transaction_date', startDate)
-      .lte('transaction_date', endDate);
-    
-    // Data bulan lalu
+    // Ambil semua journal lines dalam periode
+    const { data: lines } = await supabase
+      .from('journal_lines')
+      .select(`
+        debit, credit,
+        journals!inner (
+          journal_date, status
+        ),
+        coa!inner (
+          id, code, name, type
+        )
+      `)
+      .eq('journals.company_id', companyId)
+      .eq('journals.status', 'posted')
+      .gte('journals.journal_date', startDate)
+      .lte('journals.journal_date', endDate);
+
+    // Bulan lalu
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
     const prevStart = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
     const prevEnd = `${prevYear}-${String(prevMonth).padStart(2, '0')}-31`;
     
-    const { data: txPrev } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('company_id', companyId)
-      .gte('transaction_date', prevStart)
-      .lte('transaction_date', prevEnd);
-    
+    const { data: prevLines } = await supabase
+      .from('journal_lines')
+      .select(`
+        debit, credit,
+        journals!inner (journal_date, status),
+        coa!inner (id, code, name, type)
+      `)
+      .eq('journals.company_id', companyId)
+      .eq('journals.status', 'posted')
+      .gte('journals.journal_date', prevStart)
+      .lte('journals.journal_date', prevEnd);
+
+    // Hitung pendapatan (revenue) dan beban (expense)
     let pendapatan = 0, pengeluaran = 0;
-    (txCurrent || []).forEach(t => {
-      if (t.type === 'sale' || t.type === 'income') {
-        pendapatan += Math.abs(t.amount);
-      } else if (t.type === 'purchase' || t.type === 'expense') {
-        pengeluaran += Math.abs(t.amount);
-      }
-    });
-    
     let pendapatanPrev = 0, pengeluaranPrev = 0;
-    (txPrev || []).forEach(t => {
-      if (t.type === 'sale' || t.type === 'income') {
-        pendapatanPrev += Math.abs(t.amount);
-      } else if (t.type === 'purchase' || t.type === 'expense') {
-        pengeluaranPrev += Math.abs(t.amount);
+
+    // Proses current month
+    (lines || []).forEach((line: any) => {
+      const coaType = line.coa?.type;
+      const amount = (line.debit || 0) - (line.credit || 0);
+      if (coaType === 'revenue') {
+        pendapatan += amount;
+      } else if (coaType === 'expense') {
+        pengeluaran += Math.abs(amount);
       }
     });
-    
+
+    // Proses prev month
+    (prevLines || []).forEach((line: any) => {
+      const coaType = line.coa?.type;
+      const amount = (line.debit || 0) - (line.credit || 0);
+      if (coaType === 'revenue') {
+        pendapatanPrev += amount;
+      } else if (coaType === 'expense') {
+        pengeluaranPrev += Math.abs(amount);
+      }
+    });
+
     const laba = pendapatan - pengeluaran;
     const labaPrev = pendapatanPrev - pengeluaranPrev;
-    
-    // Piutang dari contacts
-    const { data: contacts } = await supabase
-      .from('contacts')
-      .select('balance')
+
+    // Piutang (dari COA 1111 - Piutang Usaha) - ambil saldo dari jurnal
+    const { data: coaPiutang } = await supabase
+      .from('coa')
+      .select('id')
       .eq('company_id', companyId)
-      .eq('type', 'customer');
+      .eq('code', '1111');
     
-    const piutang = (contacts || []).reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
-    
-    // Hutang dari vendor_invoices
-    const { data: vendorInvoices } = await supabase
-      .from('vendor_invoices')
-      .select('total, paid_amount, status')
+    let piutang = 0;
+    if (coaPiutang && coaPiutang.length > 0) {
+      const { data: piutangLines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit')
+        .eq('coa_id', coaPiutang[0].id)
+        .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted')).data?.map(j => j.id) || []);
+      
+      piutang = (piutangLines || []).reduce((sum, l) => sum + (l.debit - l.credit), 0);
+    }
+
+    // Hutang (dari COA 2101 - Utang Usaha)
+    const { data: coaHutang } = await supabase
+      .from('coa')
+      .select('id')
       .eq('company_id', companyId)
-      .neq('status', 'paid');
+      .eq('code', '2101');
     
-    const hutang = (vendorInvoices || []).reduce((sum, inv) => {
-      return sum + (inv.total - (inv.paid_amount || 0));
-    }, 0);
-    
-    // Kas
+    let hutang = 0;
+    if (coaHutang && coaHutang.length > 0) {
+      const { data: hutangLines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit')
+        .eq('coa_id', coaHutang[0].id)
+        .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted')).data?.map(j => j.id) || []);
+      
+      hutang = (hutangLines || []).reduce((sum, l) => sum + (l.credit - l.debit), 0);
+    }
+
+    // Kas (COA 1101, 1102)
     const { data: coaKas } = await supabase
       .from('coa')
-      .select('id, code')
+      .select('id')
       .eq('company_id', companyId)
       .ilike('code', '1101%')
       .or('code.ilike.1102%');
     
-    const kasIds = (coaKas || []).map(c => c.id);
     let totalKas = 0;
-    if (kasIds.length > 0) {
-      const { data: kasTx } = await supabase
-        .from('transactions')
-        .select('amount')
-        .eq('company_id', companyId)
-        .in('coa_id', kasIds);
-      totalKas = (kasTx || []).reduce((sum, t) => sum + t.amount, 0);
+    if (coaKas && coaKas.length > 0) {
+      const kasIds = coaKas.map(c => c.id);
+      const { data: kasLines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit')
+        .in('coa_id', kasIds)
+        .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted')).data?.map(j => j.id) || []);
+      
+      totalKas = (kasLines || []).reduce((sum, l) => sum + (l.debit - l.credit), 0);
     }
-    
+
     // Invoice count
     const { count: invoiceCount } = await supabase
       .from('invoices')
@@ -261,33 +300,33 @@ export default function Dashboard() {
       .eq('company_id', companyId)
       .gte('invoice_date', startDate)
       .lte('invoice_date', endDate);
-    
+
     // Payment Request pending
     const { count: pendingCount } = await supabase
       .from('payment_requests')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .in('status', ['submitted', 'verified']);
-    
+
     // Vendor invoice pending
     const { count: vendorInvoiceCount } = await supabase
       .from('vendor_invoices')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .in('status', ['submitted', 'verified']);
-    
+
     const calcChange = (current: number, prev: number) => {
       if (prev === 0) return current > 0 ? 100 : 0;
       return ((current - prev) / Math.abs(prev)) * 100;
     };
-    
+
     return {
       totalPendapatan: pendapatan,
       totalPengeluaran: pengeluaran,
       labaBersih: laba,
-      totalPiutang: piutang,
-      totalHutang: hutang,
-      totalKas: totalKas,
+      totalPiutang: piutang > 0 ? piutang : 0,
+      totalHutang: hutang > 0 ? hutang : 0,
+      totalKas: totalKas > 0 ? totalKas : 0,
       totalInvoice: invoiceCount || 0,
       totalPaymentPending: pendingCount || 0,
       totalVendorInvoice: vendorInvoiceCount || 0,
@@ -302,12 +341,24 @@ export default function Dashboard() {
     };
   };
 
-  const fetchTrendData = async (companyId: number, year: number, month: number) => {
+  // ============================================
+  // 2. TREND DARI JURNAL
+  // ============================================
+  const fetchTrendFromJournal = async (companyId: number, year: number, month: number) => {
     const months = [];
     const pendapatan = [];
     const pengeluaran = [];
     const laba = [];
     
+    // Ambil semua journal yang sudah diposting
+    const { data: allJournals } = await supabase
+      .from('journals')
+      .select('id, journal_date')
+      .eq('company_id', companyId)
+      .eq('status', 'posted');
+    
+    const journalIds = allJournals?.map(j => j.id) || [];
+
     for (let i = 5; i >= 0; i--) {
       let m = month - i;
       let y = year;
@@ -321,19 +372,24 @@ export default function Dashboard() {
       const start = `${y}-${String(m).padStart(2, '0')}-01`;
       const end = `${y}-${String(m).padStart(2, '0')}-31`;
       
-      const { data: tx } = await supabase
-        .from('transactions')
-        .select('type, amount')
-        .eq('company_id', companyId)
-        .gte('transaction_date', start)
-        .lte('transaction_date', end);
+      // Ambil journal lines dalam periode
+      const { data: lines } = await supabase
+        .from('journal_lines')
+        .select(`
+          debit, credit,
+          coa!inner (type)
+        `)
+        .in('journal_id', journalIds)
+        .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted').gte('journal_date', start).lte('journal_date', end)).data?.map(j => j.id) || []);
       
       let p = 0, q = 0;
-      (tx || []).forEach(t => {
-        if (t.type === 'sale' || t.type === 'income') {
-          p += Math.abs(t.amount);
-        } else if (t.type === 'purchase' || t.type === 'expense') {
-          q += Math.abs(t.amount);
+      (lines || []).forEach((line: any) => {
+        const coaType = line.coa?.type;
+        const amount = (line.debit || 0) - (line.credit || 0);
+        if (coaType === 'revenue') {
+          p += amount;
+        } else if (coaType === 'expense') {
+          q += Math.abs(amount);
         }
       });
       
@@ -345,6 +401,9 @@ export default function Dashboard() {
     return { labels: months, pendapatan, pengeluaran, laba };
   };
 
+  // ============================================
+  // 3. AGING DARI INVOICES
+  // ============================================
   const fetchAgingData = async (companyId: number) => {
     const { data: invoices } = await supabase
       .from('invoices')
@@ -372,6 +431,9 @@ export default function Dashboard() {
     return aging;
   };
 
+  // ============================================
+  // 4. STATUS PAYMENT
+  // ============================================
   const fetchStatusPayment = async (companyId: number) => {
     const { data } = await supabase
       .from('payment_requests')
@@ -387,21 +449,33 @@ export default function Dashboard() {
     return result;
   };
 
-  const fetchKategoriTransaksi = async (companyId: number, year: number, month: number) => {
+  // ============================================
+  // 5. KATEGORI TRANSAKSI DARI JURNAL
+  // ============================================
+  const fetchKategoriFromJournal = async (companyId: number, year: number, month: number) => {
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    const { data } = await supabase
-      .from('transactions')
-      .select('category, amount')
-      .eq('company_id', companyId)
-      .gte('transaction_date', start)
-      .lte('transaction_date', end);
+    const { data: lines } = await supabase
+      .from('journal_lines')
+      .select(`
+        debit, credit,
+        journals!inner (journal_date, description),
+        coa!inner (name, type)
+      `)
+      .eq('journals.company_id', companyId)
+      .eq('journals.status', 'posted')
+      .gte('journals.journal_date', start)
+      .lte('journals.journal_date', end);
     
     const kategori: Record<string, number> = {};
-    (data || []).forEach(t => {
-      const key = t.category || 'Lain-lain';
-      kategori[key] = (kategori[key] || 0) + Math.abs(t.amount);
+    (lines || []).forEach((line: any) => {
+      const coaName = line.coa?.name || 'Lain-lain';
+      const amount = Math.abs((line.debit || 0) - (line.credit || 0));
+      if (amount > 0) {
+        const key = coaName.replace('Beban ', '').replace('Pendapatan ', '');
+        kategori[key] = (kategori[key] || 0) + amount;
+      }
     });
     
     const sorted = Object.entries(kategori).sort((a, b) => b[1] - a[1]);
@@ -409,74 +483,59 @@ export default function Dashboard() {
     return Object.fromEntries(top5);
   };
 
+  // ============================================
+  // 6. TRANSAKSI TERBARU DARI JURNAL
+  // ============================================
   const fetchTransaksiTerbaru = async (companyId: number) => {
-    const { data: tx } = await supabase
-      .from('transactions')
-      .select('*')
+    const { data: journals } = await supabase
+      .from('journals')
+      .select(`
+        id, journal_number, journal_date, description,
+        journal_lines!inner (
+          debit, credit,
+          coa!inner (name, type)
+        )
+      `)
       .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
+      .eq('status', 'posted')
+      .order('journal_date', { ascending: false })
       .limit(10);
-    
-    const { data: invoices } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
-      .limit(5);
-    
-    const { data: payments } = await supabase
-      .from('payment_requests')
-      .select('*')
-      .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
-      .limit(5);
     
     const results: TransaksiTerbaru[] = [];
     
-    (tx || []).forEach(t => {
-      results.push({
-        id: t.id,
-        tanggal: t.transaction_date,
-        tipe: t.type,
-        kategori: t.category || '',
-        deskripsi: t.description || '',
-        jumlah: t.amount,
-        status: t.status || 'pending',
+    (journals || []).forEach(j => {
+      let total = 0;
+      let kategori = 'Lain-lain';
+      (j.journal_lines || []).forEach((line: any) => {
+        const amount = (line.debit || 0) - (line.credit || 0);
+        if (amount > 0) {
+          total += amount;
+          if (line.coa?.type === 'revenue') kategori = 'Pendapatan';
+          else if (line.coa?.type === 'expense') kategori = 'Beban';
+          else if (line.coa?.type === 'asset') kategori = 'Aset';
+          else if (line.coa?.type === 'liability') kategori = 'Kewajiban';
+        }
       });
+      
+      if (total > 0) {
+        results.push({
+          id: j.id,
+          tanggal: j.journal_date,
+          tipe: 'Jurnal',
+          kategori: kategori,
+          deskripsi: j.description || j.journal_number,
+          jumlah: total,
+          status: 'posted',
+          reference: j.journal_number,
+        });
+      }
     });
     
-    (invoices || []).forEach(inv => {
-      results.push({
-        id: inv.id,
-        tanggal: inv.invoice_date,
-        tipe: 'invoice',
-        kategori: 'Penjualan',
-        deskripsi: `Invoice ${inv.invoice_number} - ${inv.customer_name}`,
-        jumlah: inv.total,
-        status: inv.status,
-        reference: inv.invoice_number,
-      });
-    });
-    
-    (payments || []).forEach(p => {
-      results.push({
-        id: p.id,
-        tanggal: p.request_date,
-        tipe: 'payment_request',
-        kategori: 'Payment Request',
-        deskripsi: p.description,
-        jumlah: p.amount,
-        status: p.status,
-        reference: p.request_number,
-      });
-    });
-    
-    results.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
     return results.slice(0, 10);
   };
 
   // ============================================
-  // RENDER HELPERS
+  // RENDER HELPERS (sama seperti sebelumnya)
   // ============================================
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {
@@ -497,26 +556,25 @@ export default function Dashboard() {
       pending: 'bg-yellow-100 text-yellow-800',
       rejected: 'bg-red-100 text-red-800',
       cancelled: 'bg-red-100 text-red-800',
+      posted: 'bg-green-100 text-green-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
   const getStatusIcon = (status: string) => {
-    if (status === 'paid' || status === 'approved') return <CheckCircle className="w-4 h-4 text-green-600" />;
-    if (status === 'rejected' || status === 'cancelled') return <AlertCircle className="w-4 h-4 text-red-600" />;
+    if (status === 'paid' || status === 'approved' || status === 'posted') 
+      return <CheckCircle className="w-4 h-4 text-green-600" />;
+    if (status === 'rejected' || status === 'cancelled') 
+      return <AlertCircle className="w-4 h-4 text-red-600" />;
     return <Clock className="w-4 h-4 text-gray-600" />;
   };
 
-  // ============================================
   // CHART OPTIONS
-  // ============================================
   const barOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'top' as const,
-      },
+      legend: { position: 'top' as const },
     },
     scales: {
       y: {
@@ -532,9 +590,7 @@ export default function Dashboard() {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'top' as const,
-      },
+      legend: { position: 'top' as const },
     },
     scales: {
       y: {
@@ -550,22 +606,11 @@ export default function Dashboard() {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'right' as const,
-      },
+      legend: { position: 'right' as const },
     },
   };
 
-  // ============================================
-  // RENDER
-  // ============================================
-  if (!currentCompany) {
-    return <div className="flex justify-center py-12">Loading...</div>;
-  }
-
-  // ============================================
-  // BAR CHART COMPONENT
-  // ============================================
+  // RENDER CHARTS
   const renderBarChart = (data: TrendData | null) => {
     if (!data) return <div className="h-64 flex items-center justify-center text-gray-400">Tidak ada data</div>;
     if (data.pendapatan.every(v => v === 0) && data.pengeluaran.every(v => v === 0)) {
@@ -700,9 +745,7 @@ export default function Dashboard() {
           indexAxis: 'y' as const,
           responsive: true,
           maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-          },
+          plugins: { legend: { display: false } },
           scales: {
             x: {
               beginAtZero: true,
@@ -719,15 +762,17 @@ export default function Dashboard() {
   // ============================================
   // MAIN RENDER
   // ============================================
+  if (!currentCompany) {
+    return <div className="flex justify-center py-12">Loading...</div>;
+  }
+
   return (
     <div className="space-y-6">
       {/* HEADER */}
       <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-up">
         <div>
           <h1 className="font-display text-3xl font-bold text-text">Dashboard</h1>
-          <p className="text-text-muted mt-1">
-            Selamat datang, {user?.name || user?.email}!
-          </p>
+          <p className="text-text-muted mt-1">Selamat datang, {user?.name || user?.email}!</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -754,10 +799,8 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
-          {/* ============================================ */}
-          {/* SUMMARY CARDS - 8 KARTU */}
-          {/* ============================================ */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
+          {/* SUMMARY CARDS */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {summary && [
               { label: 'Pendapatan', value: summary.totalPendapatan, change: summary.perubahan.pendapatan, icon: TrendingUp, color: 'green' },
               { label: 'Pengeluaran', value: summary.totalPengeluaran, change: summary.perubahan.pengeluaran, icon: TrendingDown, color: 'red' },
@@ -805,58 +848,39 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* ============================================ */}
-          {/* CHARTS ROW 1 - Pendapatan vs Pengeluaran + Trend Laba */}
-          {/* ============================================ */}
+          {/* CHARTS ROW 1 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Pendapatan vs Pengeluaran</h3>
-              <div className="h-64">
-                {renderBarChart(trendData)}
-              </div>
+              <div className="h-64">{renderBarChart(trendData)}</div>
             </div>
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Trend Laba Bersih</h3>
-              <div className="h-64">
-                {renderLineChart(trendData)}
-              </div>
+              <div className="h-64">{renderLineChart(trendData)}</div>
             </div>
           </div>
 
-          {/* ============================================ */}
-          {/* CHARTS ROW 2 - Status Payment + Aging + Kategori */}
-          {/* ============================================ */}
+          {/* CHARTS ROW 2 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Status Payment Request</h3>
-              <div className="h-52">
-                {renderDoughnutChart(statusPayment)}
-              </div>
+              <div className="h-52">{renderDoughnutChart(statusPayment)}</div>
             </div>
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Aging Piutang</h3>
-              <div className="h-52">
-                {renderAgingBar(agingData)}
-              </div>
+              <div className="h-52">{renderAgingBar(agingData)}</div>
             </div>
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Kategori Transaksi</h3>
-              <div className="h-52">
-                {renderKategoriBar(kategoriTransaksi)}
-              </div>
+              <div className="h-52">{renderKategoriBar(kategoriTransaksi)}</div>
             </div>
           </div>
 
-          {/* ============================================ */}
           {/* TRANSAKSI TERBARU */}
-          {/* ============================================ */}
           <div className="bg-surface rounded-xl border border-border overflow-hidden">
             <div className="p-5 border-b border-border flex items-center justify-between">
               <h3 className="font-display font-bold text-text">Transaksi Terbaru</h3>
-              <button
-                onClick={() => navigate('/transactions')}
-                className="text-sm text-accent hover:underline"
-              >
+              <button onClick={() => navigate('/transactions')} className="text-sm text-accent hover:underline">
                 Lihat Semua →
               </button>
             </div>
@@ -873,11 +897,7 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {transaksiTerbaru.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-8 text-text-muted">
-                        Belum ada transaksi
-                      </td>
-                    </tr>
+                    <tr><td colSpan={5} className="text-center py-8 text-text-muted">Belum ada transaksi</td></tr>
                   ) : (
                     transaksiTerbaru.slice(0, 8).map((t, idx) => (
                       <motion.tr

@@ -1,4 +1,3 @@
-```tsx
 import { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -308,55 +307,55 @@ const invoiceNumber = await generateInvoiceNo(
   };
 
   const handleVerifyInvoice = async (invoice: Invoice) => {
-    try {
-      const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
-      const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
-      const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
-      
-      if (!receivableAcc || !revenueAcc) {
-        alert(`Akun tidak ditemukan. Cek COA untuk company ${currentCompany?.name}`);
-        return;
-      }
-
-      const entries = [
-        { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },
-        { account_id: revenueAcc.id, account_code: revenueAcc.code, account_name: revenueAcc.name, debit: 0, credit: invoice.subtotal },
-      ];
-      
-      if (invoice.ppn > 0 && ppnOutAcc) {
-        entries.push({ account_id: ppnOutAcc.id, account_code: ppnOutAcc.code, account_name: ppnOutAcc.name, debit: 0, credit: invoice.ppn });
-      }
-
-      const journalId = await createGeneralJournal(
-        currentCompany!.id,
-        invoice.invoice_date,
-        `Penjualan invoice ${invoice.invoice_number} - ${invoice.customer_name}`,
-        invoice.invoice_number,
-        'INVOICE',
-        invoice.id,
-        entries,
-        invoice.project_id || undefined
-      );
-
-      if (!journalId) {
-        alert('Gagal membuat jurnal');
-        return;
-      }
-
-      const { error } = await supabase
-        .from('invoices')
-        .update({ status: 'verified' })
-        .eq('id', invoice.id);
-
-      if (error) throw error;
-
-      alert('Invoice berhasil diverifikasi');
-      fetchInvoices();
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Gagal verifikasi');
+  try {
+    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+    const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
+    const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
+    
+    if (!receivableAcc || !revenueAcc) {
+      alert('Akun tidak ditemukan. Cek COA untuk company ' + currentCompany?.name);
+      return;
     }
-  };
+
+    const entries = [
+      { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },
+      { account_id: revenueAcc.id, account_code: revenueAcc.code, account_name: revenueAcc.name, debit: 0, credit: invoice.subtotal },
+    ];
+    
+    if (invoice.ppn > 0 && ppnOutAcc) {
+      entries.push({ account_id: ppnOutAcc.id, account_code: ppnOutAcc.code, account_name: ppnOutAcc.name, debit: 0, credit: invoice.ppn });
+    }
+
+    const journalId = await createGeneralJournal(
+      currentCompany!.id,
+      invoice.invoice_date,
+      'Penjualan invoice ' + invoice.invoice_number + ' - ' + invoice.customer_name,
+      invoice.invoice_number,
+      'INVOICE',
+      invoice.id,
+      entries,
+      invoice.project_id || undefined
+    );
+
+    if (!journalId) {
+      alert('Gagal membuat jurnal');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('invoices')
+      .update({ status: 'verified' })
+      .eq('id', invoice.id);
+
+    if (error) throw error;
+
+    alert('Invoice berhasil diverifikasi');
+    fetchInvoices();
+  } catch (error) {
+    console.error('Error:', error);
+    alert('Gagal verifikasi');
+  }
+};
 
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
@@ -776,4 +775,3 @@ const invoiceNumber = await generateInvoiceNo(
     </div>
   );
 }
-```

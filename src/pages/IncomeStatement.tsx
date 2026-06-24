@@ -1,191 +1,322 @@
-// src/lib/invoiceTemplate.ts
+import { useState, useEffect } from 'react';
+import { Calendar, Download, Printer, Loader2, FileSpreadsheet } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { supabase } from '../lib/supabase';
+import { useCompany } from '../contexts/CompanyContext';
+import { formatCurrency } from '../lib/accountingHelpers';
 
-export function generateInvoiceHTML(invoice: any, company: any, customer: any, items: any[]) {
-  const formatRupiah = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+type AccountBalance = {
+  id: number;
+  account_code: string;
+  account_name: string;
+  balance: number;
+  type: string;
+};
+
+type IncomeStatementData = {
+  revenue: AccountBalance[];
+  expenses: AccountBalance[];
+  totalRevenue: number;
+  totalExpenses: number;
+  netIncome: number;
+};
+
+export default function IncomeStatement() {
+  const { currentCompany } = useCompany();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<IncomeStatementData>({
+    revenue: [],
+    expenses: [],
+    totalRevenue: 0,
+    totalExpenses: 0,
+    netIncome: 0,
+  });
+  
+  const [startDate, setStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(1);
+    return date.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+
+  useEffect(() => {
+    if (currentCompany?.id) {
+      fetchIncomeStatement();
+    }
+  }, [currentCompany, startDate, endDate]);
+
+  const fetchIncomeStatement = async () => {
+    if (!currentCompany?.id) return;
+    setLoading(true);
+
+    try {
+      // Ambil data dari view income_statement
+      const { data: viewData, error } = await supabase
+        .from('income_statement')
+        .select('*')
+        .eq('company_id', currentCompany.id);
+
+      if (error) {
+        console.error('Error fetching income statement:', error);
+        setLoading(false);
+        return;
+      }
+
+      console.log('Income statement data:', viewData);
+
+      if (!viewData || viewData.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Filter dan mapping untuk pendapatan
+      const revenueList = viewData
+        .filter(item => item.account_type === 'revenue' && item.balance !== 0)
+        .map(item => ({
+          id: item.coa_id,
+          account_code: item.account_code,
+          account_name: item.account_name,
+          balance: item.balance,
+          type: item.account_type,
+        }));
+
+      // Filter dan mapping untuk beban
+      const expensesList = viewData
+        .filter(item => item.account_type === 'expense' && item.balance !== 0)
+        .map(item => ({
+          id: item.coa_id,
+          account_code: item.account_code,
+          account_name: item.account_name,
+          balance: item.balance,
+          type: item.account_type,
+        }));
+
+      const totalRevenue = revenueList.reduce((sum, r) => sum + r.balance, 0);
+      const totalExpenses = expensesList.reduce((sum, e) => sum + e.balance, 0);
+
+      setData({
+        revenue: revenueList,
+        expenses: expensesList,
+        totalRevenue,
+        totalExpenses,
+        netIncome: totalRevenue - totalExpenses,
+      });
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const formatDate = (date: string) => {
-    if (!date) return '';
-    const d = new Date(date);
-    const bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-    return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+    return new Date(date).toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
   };
 
-  let itemsHtml = '';
-  let totalSubtotal = 0;
+  // ========== DOWNLOAD PDF ==========
+  const handleDownloadPDF = () => {
+    const printWindow = window.open('', '_blank');
+    const html = generatePDFHTML();
+    printWindow?.document.write(html);
+    printWindow?.document.close();
+  };
 
-  if (items && items.length > 0) {
-    items.forEach((item) => {
-      const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
-      totalSubtotal += itemTotal;
-      const additionalText = item.additional || '';
-      itemsHtml += `
-        <tr>
-          <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; vertical-align: top;">
-            ${item.description || ''}
-            ${additionalText ? `<br><span style="font-size: 10px; color: #555;">${additionalText}</span>` : ''}
-          </td>
-          <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; text-align: right;">${formatRupiah(itemTotal)}</td>
-          <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; text-align: center;">${item.quantity || 0}</td>
-          <td style="padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; text-align: right;">${formatRupiah(itemTotal)}</td>
-        </tr>
-      `;
-    });
-  } else {
-    itemsHtml = `
-      <tr>
-        <td colspan="4" style="padding: 20px 0; font-size: 12px; text-align: center; color: #999;">
-          Tidak ada item
-        </td>
-      </tr>
+  const generatePDFHTML = () => {
+    const formatRp = (amount: number) => {
+      return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+    };
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Laba Rugi - ${currentCompany?.name}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Times New Roman', Times, serif; padding: 40px; }
+          .header { text-align: center; margin-bottom: 30px; }
+          .company-name { font-size: 18px; font-weight: bold; }
+          .report-title { font-size: 16px; margin-top: 5px; }
+          .period { font-size: 12px; margin-top: 3px; }
+          .section { margin-bottom: 25px; }
+          .section-title { font-size: 14px; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 10px; }
+          .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+          .total-row { display: flex; justify-content: space-between; padding: 8px 0; margin-top: 8px; border-top: 1px solid #ccc; font-weight: bold; }
+          .net-income { background: #f0f0f0; padding: 10px; margin-top: 20px; font-weight: bold; font-size: 14px; display: flex; justify-content: space-between; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-name">${currentCompany?.name || 'PT Artha Kondang Internasional'}</div>
+          <div class="report-title">LAPORAN LABA RUGI</div>
+          <div class="period">Periode: ${formatDate(startDate)} s/d ${formatDate(endDate)}</div>
+        </div>
+        <div class="section">
+          <div class="section-title">PENDAPATAN</div>
+          ${data.revenue.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
+          <div class="total-row"><span>TOTAL PENDAPATAN</span><span>${formatRp(data.totalRevenue)}</span></div>
+        </div>
+        <div class="section">
+          <div class="section-title">BEBAN</div>
+          ${data.expenses.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
+          <div class="total-row"><span>TOTAL BEBAN</span><span>${formatRp(data.totalExpenses)}</span></div>
+        </div>
+        <div class="net-income"><span>LABA BERSIH</span><span>${formatRp(data.netIncome)}</span></div>
+        <div style="margin-top: 30px; font-size: 10px; text-align: center;">Dicetak: ${new Date().toLocaleDateString('id-ID')}</div>
+      </body>
+      </html>
     `;
-  }
+  };
 
-  const ppn = invoice.ppn || Math.round(totalSubtotal * 0.11);
-  const grandTotal = invoice.total || totalSubtotal + ppn;
-  const paidAmount = invoice.paid_amount || 0;
-  const remainingAmount = grandTotal - paidAmount;
+  // ========== DOWNLOAD EXCEL ==========
+  const handleDownloadExcel = () => {
+    let csvContent = "LAPORAN LABA RUGI\n\n";
+    csvContent += `Periode: ${formatDate(startDate)} s/d ${formatDate(endDate)}\n\n`;
+    csvContent += "PENDAPATAN\n";
+    csvContent += "Akun,Jumlah\n";
+    data.revenue.forEach(item => {
+      csvContent += `${item.account_name},${item.balance}\n`;
+    });
+    csvContent += `TOTAL PENDAPATAN,${data.totalRevenue}\n\n`;
+    csvContent += "BEBAN\n";
+    csvContent += "Akun,Jumlah\n";
+    data.expenses.forEach(item => {
+      csvContent += `${item.account_name},${item.balance}\n`;
+    });
+    csvContent += `TOTAL BEBAN,${data.totalExpenses}\n\n`;
+    csvContent += `LABA BERSIH,${data.netIncome}\n`;
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Invoice ${invoice.invoice_number}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Times New Roman', Times, serif; background: #e0e0e0; display: flex; justify-content: center; padding: 20px; }
-    .invoice { width: 21cm; min-height: 29.7cm; background: white; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; position: relative; }
-    .banner { background: #0a1628; padding: 20px 30px; }
-    .banner-top { display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
-    .logo { width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; }
-    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    .company-info { flex: 1; }
-    .company-info h1 { color: white; font-size: 22px; letter-spacing: 1px; margin-bottom: 4px; }
-    .company-info p { color: #aaa; font-size: 11px; }
-    .invoice-title { text-align: right; }
-    .invoice-title h2 { font-size: 28px; color: #d4a017; letter-spacing: 2px; }
-    .invoice-title .no { font-size: 11px; color: #aaa; }
-    .banner-dates { display: flex; justify-content: flex-end; gap: 30px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 12px; }
-    .date-item { text-align: right; }
-    .date-label { font-size: 9px; color: #aaa; margin-bottom: 2px; }
-    .date-value { font-size: 12px; color: white; font-weight: 500; }
-    .gold-separator { height: 3px; background: linear-gradient(90deg, #d4a017, #f0c040, #d4a017); width: 100%; }
-    .content { padding: 25px 30px; flex: 1; }
-    .to-section { margin-bottom: 25px; }
-    .to-title { font-weight: bold; font-size: 11px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .to-address { font-size: 11px; line-height: 1.5; }
-    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-    .items-table th { text-align: left; padding: 8px 0; font-size: 11px; font-weight: bold; border-bottom: 1px solid #000; }
-    .items-table td { padding: 10px 0; font-size: 11px; border-bottom: 1px solid #ccc; vertical-align: top; }
-    .text-right { text-align: right; }
-    .text-center { text-align: center; }
-    .summary-table { width: 100%; margin-bottom: 20px; }
-    .summary-table td { padding: 3px 0; font-size: 11px; }
-    .summary-table .grand-total td { font-weight: bold; padding-top: 8px; border-top: 1px solid #000; }
-    .payment-section { margin-bottom: 20px; }
-    .payment-title { font-weight: bold; font-size: 12px; margin-bottom: 6px; }
-    .payment-details { font-size: 11px; line-height: 1.5; }
-    .signature { text-align: right; margin-top: 20px; margin-bottom: 10px; }
-    .signature-img { max-width: 100px; height: auto; margin-bottom: 4px; }
-    .signature-line { width: 150px; margin-left: auto; border-top: 1px solid #000; margin-bottom: 4px; }
-    .signature-name { font-size: 11px; font-weight: bold; }
-    .signature-title { font-size: 10px; }
-    .footer { background: #f8f8f8; padding: 15px 30px; border-top: 2px solid #d4a017; text-align: center; margin-top: auto; }
-    .thankyou { font-weight: bold; font-size: 13px; color: #0a1628; margin-bottom: 10px; letter-spacing: 1px; }
-    .contact { font-size: 9px; color: #555; line-height: 1.6; }
-    @media print {
-      body { background: white; padding: 0; margin: 0; }
-      .invoice { box-shadow: none; margin: 0; width: 100%; }
-      .banner { background: #0a1628 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .gold-separator { background: #d4a017 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style>
-</head>
-<body>
-  <div class="invoice">
-    <div class="banner">
-      <div class="banner-top">
-        <div class="logo">
-          ${company?.logo_url ? `<img src="${company.logo_url}" alt="Logo">` : '<div style="width:70px;height:70px;background:#d4a017;border-radius:50%;"></div>'}
-        </div>
-        <div class="company-info">
-          <h1>${company?.name?.toUpperCase() || 'PT ARTHA KONDANG INTERNASIONAL'}</h1>
-          <p>${company?.address || 'Taman Tekno X BSD Blok G No 2, Tangerang Selatan - Banten 15314'}</p>
-          <p>${company?.phone || '+62821-3017-2363'} | ${company?.email || 'finance@arthakondang.co.id'}</p>
-        </div>
-        <div class="invoice-title">
-          <h2>INVOICE</h2>
-          <div class="no">No. ${invoice.invoice_number}</div>
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `laba_rugi_${startDate}_to_${endDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="animate-slide-in-up">
+        <h1 className="font-display text-3xl font-bold text-text">Laporan Laba Rugi</h1>
+        <p className="text-text-muted mt-1">Ringkasan pendapatan dan beban perusahaan</p>
+      </div>
+
+      <div className="bg-surface rounded-xl border border-border p-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Dari Tanggal</label>
+            <input 
+              type="date" 
+              value={startDate} 
+              onChange={(e) => setStartDate(e.target.value)} 
+              className="w-full px-4 py-2 border rounded-lg" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Sampai Tanggal</label>
+            <input 
+              type="date" 
+              value={endDate} 
+              onChange={(e) => setEndDate(e.target.value)} 
+              className="w-full px-4 py-2 border rounded-lg" 
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <button 
+              onClick={fetchIncomeStatement} 
+              className="px-4 py-2 bg-accent text-white rounded-lg"
+            >
+              Tampilkan
+            </button>
+          </div>
+          <div className="flex items-end gap-2">
+            <button 
+              onClick={handleDownloadPDF} 
+              className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+            >
+              <Printer className="w-4 h-4 inline mr-2" />PDF
+            </button>
+            <button 
+              onClick={handleDownloadExcel} 
+              className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+            >
+              <FileSpreadsheet className="w-4 h-4 inline mr-2" />Excel
+            </button>
+          </div>
         </div>
       </div>
-      <div class="banner-dates">
-        <div class="date-item"><div class="date-label">INVOICE DATE</div><div class="date-value">${formatDate(invoice.invoice_date)}</div></div>
-        <div class="date-item"><div class="date-label">DUE DATE</div><div class="date-value">${formatDate(invoice.due_date)}</div></div>
+
+      <div className="bg-surface rounded-xl border border-border overflow-hidden p-6">
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-accent" />
+          </div>
+        ) : (
+          <>
+            <div className="text-center mb-8">
+              <h2 className="font-display text-2xl font-bold">LAPORAN LABA RUGI</h2>
+              <p className="text-text-muted">{formatDate(startDate)} s/d {formatDate(endDate)}</p>
+              <p className="text-sm">{currentCompany.name}</p>
+            </div>
+
+            {/* PENDAPATAN */}
+            <div className="mb-8">
+              <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">PENDAPATAN</h3>
+              {data.revenue.length === 0 ? (
+                <p className="text-text-muted">Tidak ada data pendapatan</p>
+              ) : (
+                data.revenue.map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-1">
+                    <span className="text-text">{item.account_name}</span>
+                    <span className="text-success">{formatCurrency(item.balance)}</span>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between pt-2 mt-2 border-t font-bold">
+                <span>Total Pendapatan</span>
+                <span className="text-success">{formatCurrency(data.totalRevenue)}</span>
+              </div>
+            </div>
+
+            {/* BEBAN */}
+            <div className="mb-8">
+              <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">BEBAN</h3>
+              {data.expenses.length === 0 ? (
+                <p className="text-text-muted">Tidak ada data beban</p>
+              ) : (
+                data.expenses.map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-1">
+                    <span className="text-text">{item.account_name}</span>
+                    <span className="text-danger">{formatCurrency(item.balance)}</span>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between pt-2 mt-2 border-t font-bold">
+                <span>Total Beban</span>
+                <span className="text-danger">{formatCurrency(data.totalExpenses)}</span>
+              </div>
+            </div>
+
+            {/* LABA BERSIH */}
+            <div className="bg-info/10 p-4 rounded-lg">
+              <div className="flex justify-between font-bold text-xl">
+                <span>LABA BERSIH</span>
+                <span className={data.netIncome >= 0 ? 'text-success' : 'text-danger'}>
+                  {formatCurrency(data.netIncome)}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
-    <div class="gold-separator"></div>
-    <div class="content">
-      <div class="to-section">
-        <div class="to-title">TO:</div>
-        <div class="to-address">
-          ${customer?.name || invoice.customer_name}<br>
-          ${customer?.address || ''}<br>
-          ${customer?.phone || ''}
-        </div>
-      </div>
-      <table class="items-table">
-        <thead>
-          <tr>
-            <th style="width: 45%">DESCRIPTION</th>
-            <th style="width: 20%" class="text-right">SUB TOTAL</th>
-            <th style="width: 15%" class="text-center">QTY</th>
-            <th style="width: 20%" class="text-right">TOTAL</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsHtml}
-        </tbody>
-      </table>
-      <table class="summary-table">
-        <tr><td style="width: 70%; text-align: right;">Subtotal</td><td style="width: 30%; text-align: right;">${formatRupiah(totalSubtotal)}</td></tr>
-        <tr><td style="text-align: right;">PPN 11%</td><td style="text-align: right;">${formatRupiah(ppn)}</td></tr>
-        <tr class="grand-total"><td style="text-align: right;"><strong>Grand Total</strong></td><td style="text-align: right;"><strong>${formatRupiah(grandTotal)}</strong></td></tr>
-        ${paidAmount > 0 ? `
-        <tr><td style="text-align: right; color: #059669;">Sudah Dibayar</td><td style="text-align: right; color: #059669;">(${formatRupiah(paidAmount)})</td></tr>
-        <tr><td style="text-align: right; font-weight: bold;">Sisa Tagihan</td><td style="text-align: right; font-weight: bold;">${formatRupiah(remainingAmount)}</td></tr>
-        ` : ''}
-      </table>
-      <div class="payment-section">
-        <div class="payment-title">PAYMENT METHODS</div>
-        <div class="payment-details">
-          Account No: ${company?.bank_account || '1010000777068'}<br>
-          Account Name: ${company?.name || 'PT Artha Kondang Internasional'}<br>
-          Branch Name: ${company?.bank_branch || 'Bank Mandiri KK Jkt Gandaria City'}<br>
-          Swift Code: ${company?.swift_code || 'BMRIIDJXXX'}
-        </div>
-      </div>
-      <div class="signature">
-        ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') && company?.signature_url ? 
-          `<img src="${company.signature_url}" class="signature-img" />` : 
-          `<div class="signature-line"></div>`
-        }
-        <div class="signature-name">${company?.director || 'Adis Nugroho Santoso'}</div>
-        <div class="signature-title">Direktur Utama</div>
-      </div>
-    </div>
-    <div class="footer">
-      <div class="thankyou">THANK YOU FOR YOUR BUSINESS</div>
-      <div class="contact">
-        ${company?.phone || '+62821-3017-2363'} | ${company?.email || 'finance@arthakondang.co.id'}<br>
-        ${company?.address || 'Taman Tekno X BSD Blok G No 2, Tangerang Selatan - Banten 15314'}
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
+  );
 }

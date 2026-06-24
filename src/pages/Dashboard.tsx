@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   TrendingUp, TrendingDown, DollarSign, Receipt, Users, FileText, 
-  ArrowUpRight, ArrowDownRight, Calendar, RefreshCw, Download, 
-  Building2, ChevronDown, ChevronUp, Clock, AlertCircle, CheckCircle,
-  FileSpreadsheet, Printer
+  ArrowUpRight, ArrowDownRight, Calendar, RefreshCw, 
+  Clock, AlertCircle, CheckCircle, Building2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -41,9 +40,6 @@ ChartJS.register(
   Filler
 );
 
-// ============================================
-// TYPES
-// ============================================
 type DashboardSummary = {
   totalPendapatan: number;
   totalPengeluaran: number;
@@ -99,92 +95,64 @@ type TransaksiTerbaru = {
   reference?: string;
 };
 
-// ============================================
-// MAIN COMPONENT
-// ============================================
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { currentCompany, companies } = useCompany();
+  const { currentCompany } = useCompany();
   const { user } = useAuth();
   
-  // ========== STATE ==========
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [trendData, setTrendData] = useState<TrendData | null>(null);
   const [agingData, setAgingData] = useState<AgingData | null>(null);
   const [statusPayment, setStatusPayment] = useState<StatusPaymentData | null>(null);
   const [kategoriTransaksi, setKategoriTransaksi] = useState<KategoriTransaksi | null>(null);
   const [transaksiTerbaru, setTransaksiTerbaru] = useState<TransaksiTerbaru[]>([]);
-  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-  
-  const isSuperAdmin = user?.role === 'super_admin';
-  const isDirektur = user?.role === 'direktur';
-  const canSeeAllCompanies = isSuperAdmin || isDirektur;
-  
-  // ========== EFFECTS ==========
+
+  // ========== FETCH DATA OTOMATIS ==========
   useEffect(() => {
     if (currentCompany?.id) {
-      setSelectedCompanyId(currentCompany.id);
-    }
-  }, [currentCompany]);
-  
-  useEffect(() => {
-    if (selectedCompanyId && selectedMonth) {
       fetchDashboardData();
     }
-  }, [selectedCompanyId, selectedMonth]);
-  
-  // ========== FETCH DATA ==========
+  }, [currentCompany, selectedMonth]);
+
   const fetchDashboardData = async () => {
-    if (!selectedCompanyId) return;
+    if (!currentCompany?.id) return;
     
     setLoading(true);
     try {
-      const companyId = selectedCompanyId;
+      const companyId = currentCompany.id;
       const [year, month] = selectedMonth.split('-').map(Number);
-      
-      // ========================================
-      // 1. SUMMARY CARDS
-      // ========================================
+
+      // 1. SUMMARY
       const summaryData = await fetchSummary(companyId, year, month);
       setSummary(summaryData);
-      
-      // ========================================
-      // 2. TREND DATA (6 months)
-      // ========================================
+
+      // 2. TREND (6 bulan)
       const trend = await fetchTrendData(companyId, year, month);
       setTrendData(trend);
-      
-      // ========================================
-      // 3. AGING PIUTANG
-      // ========================================
+
+      // 3. AGING
       const aging = await fetchAgingData(companyId);
       setAgingData(aging);
-      
-      // ========================================
-      // 4. STATUS PAYMENT REQUEST
-      // ========================================
+
+      // 4. STATUS PAYMENT
       const status = await fetchStatusPayment(companyId);
       setStatusPayment(status);
-      
-      // ========================================
+
       // 5. KATEGORI TRANSAKSI
-      // ========================================
       const kategori = await fetchKategoriTransaksi(companyId, year, month);
       setKategoriTransaksi(kategori);
-      
-      // ========================================
+
       // 6. TRANSAKSI TERBARU
-      // ========================================
       const transaksi = await fetchTransaksiTerbaru(companyId);
       setTransaksiTerbaru(transaksi);
-      
+
     } catch (error) {
       console.error('Error fetching dashboard:', error);
     } finally {
@@ -192,18 +160,16 @@ export default function Dashboard() {
       setRefreshing(false);
     }
   };
-  
+
   const handleRefresh = () => {
     setRefreshing(true);
     fetchDashboardData();
   };
-  
+
   // ============================================
   // FETCH FUNCTIONS
   // ============================================
-  
   const fetchSummary = async (companyId: number, year: number, month: number) => {
-    // Ambil data transaksi bulan ini
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
@@ -228,7 +194,6 @@ export default function Dashboard() {
       .gte('transaction_date', prevStart)
       .lte('transaction_date', prevEnd);
     
-    // Hitung total pendapatan & pengeluaran
     let pendapatan = 0, pengeluaran = 0;
     (txCurrent || []).forEach(t => {
       if (t.type === 'sale' || t.type === 'income') {
@@ -250,7 +215,7 @@ export default function Dashboard() {
     const laba = pendapatan - pengeluaran;
     const labaPrev = pendapatanPrev - pengeluaranPrev;
     
-    // Piutang dari contacts (customer balance > 0)
+    // Piutang dari contacts
     const { data: contacts } = await supabase
       .from('contacts')
       .select('balance')
@@ -259,7 +224,7 @@ export default function Dashboard() {
     
     const piutang = (contacts || []).reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
     
-    // Hutang dari vendor_invoices yang belum lunas
+    // Hutang dari vendor_invoices
     const { data: vendorInvoices } = await supabase
       .from('vendor_invoices')
       .select('total, paid_amount, status')
@@ -270,7 +235,7 @@ export default function Dashboard() {
       return sum + (inv.total - (inv.paid_amount || 0));
     }, 0);
     
-    // Kas (akun kas/bank) - ambil dari COA
+    // Kas
     const { data: coaKas } = await supabase
       .from('coa')
       .select('id, code')
@@ -281,13 +246,11 @@ export default function Dashboard() {
     const kasIds = (coaKas || []).map(c => c.id);
     let totalKas = 0;
     if (kasIds.length > 0) {
-      // Ambil saldo kas dari transaksi
       const { data: kasTx } = await supabase
         .from('transactions')
         .select('amount')
         .eq('company_id', companyId)
         .in('coa_id', kasIds);
-      
       totalKas = (kasTx || []).reduce((sum, t) => sum + t.amount, 0);
     }
     
@@ -313,7 +276,6 @@ export default function Dashboard() {
       .eq('company_id', companyId)
       .in('status', ['submitted', 'verified']);
     
-    // Persentase perubahan
     const calcChange = (current: number, prev: number) => {
       if (prev === 0) return current > 0 ? 100 : 0;
       return ((current - prev) / Math.abs(prev)) * 100;
@@ -334,12 +296,12 @@ export default function Dashboard() {
         pendapatan: calcChange(pendapatan, pendapatanPrev),
         pengeluaran: calcChange(pengeluaran, pengeluaranPrev),
         laba: calcChange(laba, labaPrev),
-        piutang: 0, // placeholder
-        kas: 0, // placeholder
+        piutang: 0,
+        kas: 0,
       }
     };
   };
-  
+
   const fetchTrendData = async (companyId: number, year: number, month: number) => {
     const months = [];
     const pendapatan = [];
@@ -382,7 +344,7 @@ export default function Dashboard() {
     
     return { labels: months, pendapatan, pengeluaran, laba };
   };
-  
+
   const fetchAgingData = async (companyId: number) => {
     const { data: invoices } = await supabase
       .from('invoices')
@@ -409,7 +371,7 @@ export default function Dashboard() {
     
     return aging;
   };
-  
+
   const fetchStatusPayment = async (companyId: number) => {
     const { data } = await supabase
       .from('payment_requests')
@@ -424,7 +386,7 @@ export default function Dashboard() {
     });
     return result;
   };
-  
+
   const fetchKategoriTransaksi = async (companyId: number, year: number, month: number) => {
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const end = `${year}-${String(month).padStart(2, '0')}-31`;
@@ -442,14 +404,12 @@ export default function Dashboard() {
       kategori[key] = (kategori[key] || 0) + Math.abs(t.amount);
     });
     
-    // Sort descending dan ambil top 5
     const sorted = Object.entries(kategori).sort((a, b) => b[1] - a[1]);
     const top5 = sorted.slice(0, 5);
     return Object.fromEntries(top5);
   };
-  
+
   const fetchTransaksiTerbaru = async (companyId: number) => {
-    // Gabungkan dari beberapa sumber (transactions, invoices, payment_requests)
     const { data: tx } = await supabase
       .from('transactions')
       .select('*')
@@ -511,15 +471,13 @@ export default function Dashboard() {
       });
     });
     
-    // Sort by tanggal descending
     results.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
     return results.slice(0, 10);
   };
-  
+
   // ============================================
   // RENDER HELPERS
   // ============================================
-  
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -527,7 +485,7 @@ export default function Dashboard() {
       year: 'numeric',
     });
   };
-  
+
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       paid: 'bg-green-100 text-green-800',
@@ -542,18 +500,16 @@ export default function Dashboard() {
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
-  
+
   const getStatusIcon = (status: string) => {
     if (status === 'paid' || status === 'approved') return <CheckCircle className="w-4 h-4 text-green-600" />;
     if (status === 'rejected' || status === 'cancelled') return <AlertCircle className="w-4 h-4 text-red-600" />;
-    if (status === 'submitted' || status === 'verified') return <Clock className="w-4 h-4 text-yellow-600" />;
     return <Clock className="w-4 h-4 text-gray-600" />;
   };
-  
+
   // ============================================
   // CHART OPTIONS
   // ============================================
-  
   const barOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -571,7 +527,7 @@ export default function Dashboard() {
       },
     },
   };
-  
+
   const lineOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -589,7 +545,7 @@ export default function Dashboard() {
       },
     },
   };
-  
+
   const doughnutOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -599,17 +555,170 @@ export default function Dashboard() {
       },
     },
   };
-  
+
   // ============================================
   // RENDER
   // ============================================
-  
   if (!currentCompany) {
     return <div className="flex justify-center py-12">Loading...</div>;
   }
-  
-  const companyOptions = canSeeAllCompanies ? companies : [currentCompany];
-  
+
+  // ============================================
+  // BAR CHART COMPONENT
+  // ============================================
+  const renderBarChart = (data: TrendData | null) => {
+    if (!data) return <div className="h-64 flex items-center justify-center text-gray-400">Tidak ada data</div>;
+    if (data.pendapatan.every(v => v === 0) && data.pengeluaran.every(v => v === 0)) {
+      return <div className="h-64 flex items-center justify-center text-gray-400">Belum ada transaksi</div>;
+    }
+    return (
+      <Bar
+        data={{
+          labels: data.labels,
+          datasets: [
+            {
+              label: 'Pendapatan',
+              data: data.pendapatan,
+              backgroundColor: 'rgba(34, 197, 94, 0.6)',
+              borderColor: 'rgb(34, 197, 94)',
+              borderWidth: 1,
+            },
+            {
+              label: 'Pengeluaran',
+              data: data.pengeluaran,
+              backgroundColor: 'rgba(239, 68, 68, 0.6)',
+              borderColor: 'rgb(239, 68, 68)',
+              borderWidth: 1,
+            },
+          ],
+        }}
+        options={barOptions}
+      />
+    );
+  };
+
+  const renderLineChart = (data: TrendData | null) => {
+    if (!data) return <div className="h-64 flex items-center justify-center text-gray-400">Tidak ada data</div>;
+    if (data.laba.every(v => v === 0)) {
+      return <div className="h-64 flex items-center justify-center text-gray-400">Belum ada laba</div>;
+    }
+    return (
+      <Line
+        data={{
+          labels: data.labels,
+          datasets: [
+            {
+              label: 'Laba Bersih',
+              data: data.laba,
+              borderColor: 'rgb(59, 130, 246)',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              fill: true,
+              tension: 0.3,
+            },
+          ],
+        }}
+        options={lineOptions}
+      />
+    );
+  };
+
+  const renderDoughnutChart = (data: StatusPaymentData | null) => {
+    if (!data) return <div className="h-52 flex items-center justify-center text-gray-400">Tidak ada data</div>;
+    const total = Object.values(data).reduce((sum, v) => sum + v, 0);
+    if (total === 0) {
+      return <div className="h-52 flex items-center justify-center text-gray-400">Belum ada payment request</div>;
+    }
+    return (
+      <Doughnut
+        data={{
+          labels: ['Draft', 'Submitted', 'Verified', 'Approved', 'Rejected'],
+          datasets: [
+            {
+              data: [data.draft, data.submitted, data.verified, data.approved, data.rejected],
+              backgroundColor: [
+                'rgba(156, 163, 175, 0.8)',
+                'rgba(59, 130, 246, 0.8)',
+                'rgba(234, 179, 8, 0.8)',
+                'rgba(34, 197, 94, 0.8)',
+                'rgba(239, 68, 68, 0.8)',
+              ],
+            },
+          ],
+        }}
+        options={doughnutOptions}
+      />
+    );
+  };
+
+  const renderAgingBar = (data: AgingData | null) => {
+    if (!data) return <div className="h-52 flex items-center justify-center text-gray-400">Tidak ada data</div>;
+    const total = Object.values(data).reduce((sum, v) => sum + v, 0);
+    if (total === 0) {
+      return <div className="h-52 flex items-center justify-center text-gray-400">Tidak ada piutang</div>;
+    }
+    return (
+      <Bar
+        data={{
+          labels: ['0-30 hari', '31-60 hari', '61-90 hari', '>90 hari'],
+          datasets: [
+            {
+              label: 'Piutang',
+              data: [data['0-30'], data['31-60'], data['61-90'], data['>90']],
+              backgroundColor: [
+                'rgba(34, 197, 94, 0.7)',
+                'rgba(234, 179, 8, 0.7)',
+                'rgba(251, 146, 60, 0.7)',
+                'rgba(239, 68, 68, 0.7)',
+              ],
+            },
+          ],
+        }}
+        options={barOptions}
+      />
+    );
+  };
+
+  const renderKategoriBar = (data: KategoriTransaksi | null) => {
+    if (!data) return <div className="h-52 flex items-center justify-center text-gray-400">Tidak ada data</div>;
+    const keys = Object.keys(data);
+    if (keys.length === 0) {
+      return <div className="h-52 flex items-center justify-center text-gray-400">Belum ada transaksi</div>;
+    }
+    return (
+      <Bar
+        data={{
+          labels: keys,
+          datasets: [
+            {
+              label: 'Jumlah',
+              data: Object.values(data),
+              backgroundColor: 'rgba(99, 102, 241, 0.7)',
+            },
+          ],
+        }}
+        options={{
+          indexAxis: 'y' as const,
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: {
+                callback: (value: any) => `Rp ${(value / 1000000).toFixed(0)}J`,
+              },
+            },
+          },
+        }}
+      />
+    );
+  };
+
+  // ============================================
+  // MAIN RENDER
+  // ============================================
   return (
     <div className="space-y-6">
       {/* HEADER */}
@@ -621,48 +730,12 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {/* Company Filter */}
-          {canSeeAllCompanies && companies.length > 1 && (
-            <div className="relative">
-              <button
-                onClick={() => setShowCompanyDropdown(!showCompanyDropdown)}
-                className="flex items-center gap-2 px-4 py-2 bg-surface border border-border rounded-lg hover:border-accent transition-colors"
-              >
-                <Building2 className="w-4 h-4 text-accent" />
-                <span className="text-sm font-medium">
-                  {companies.find(c => c.id === selectedCompanyId)?.name || 'Pilih Perusahaan'}
-                </span>
-                {showCompanyDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </button>
-              {showCompanyDropdown && (
-                <div className="absolute right-0 mt-2 w-56 bg-surface border border-border rounded-lg shadow-lg z-20 overflow-hidden">
-                  {companies.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => {
-                        setSelectedCompanyId(c.id);
-                        setShowCompanyDropdown(false);
-                      }}
-                      className={`w-full text-left px-4 py-2.5 text-sm hover:bg-background transition-colors ${
-                        selectedCompanyId === c.id ? 'bg-accent/10 text-accent font-medium' : 'text-text'
-                      }`}
-                    >
-                      {c.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          
-          {/* Period Filter */}
           <input
             type="month"
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="px-3 py-2 border border-border rounded-lg text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
           />
-          
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -673,7 +746,7 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
-      
+
       {/* LOADING */}
       {loading ? (
         <div className="flex justify-center py-20">
@@ -682,239 +755,98 @@ export default function Dashboard() {
       ) : (
         <>
           {/* ============================================ */}
-          {/* SUMMARY CARDS */}
+          {/* SUMMARY CARDS - 8 KARTU */}
           {/* ============================================ */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
             {summary && [
-              { label: 'Pendapatan', value: summary.totalPendapatan, change: summary.perubahan.pendapatan, icon: TrendingUp, color: 'success' },
-              { label: 'Pengeluaran', value: summary.totalPengeluaran, change: summary.perubahan.pengeluaran, icon: TrendingDown, color: 'danger' },
-              { label: 'Laba Bersih', value: summary.labaBersih, change: summary.perubahan.laba, icon: DollarSign, color: 'info' },
-              { label: 'Piutang', value: summary.totalPiutang, change: 0, icon: Receipt, color: 'warning' },
-              { label: 'Hutang', value: summary.totalHutang, change: 0, icon: FileText, color: 'danger' },
+              { label: 'Pendapatan', value: summary.totalPendapatan, change: summary.perubahan.pendapatan, icon: TrendingUp, color: 'green' },
+              { label: 'Pengeluaran', value: summary.totalPengeluaran, change: summary.perubahan.pengeluaran, icon: TrendingDown, color: 'red' },
+              { label: 'Laba Bersih', value: summary.labaBersih, change: summary.perubahan.laba, icon: DollarSign, color: 'blue' },
+              { label: 'Piutang', value: summary.totalPiutang, change: 0, icon: Receipt, color: 'yellow' },
+              { label: 'Hutang', value: summary.totalHutang, change: 0, icon: FileText, color: 'orange' },
+              { label: 'Saldo Kas', value: summary.totalKas, change: 0, icon: Building2, color: 'teal' },
+              { label: 'Total Invoice', value: summary.totalInvoice, change: 0, icon: FileText, color: 'purple' },
+              { label: 'Pending PR', value: summary.totalPaymentRequestPending, change: 0, icon: Clock, color: 'red' },
             ].map((stat, index) => (
               <motion.div
                 key={stat.label}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
+                transition={{ delay: Math.min(index * 0.05, 0.5) }}
                 className="bg-surface rounded-xl border border-border p-4 card-hover"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <p className="text-text-muted text-xs font-medium truncate">{stat.label}</p>
-                    <p className="text-text text-xl font-bold font-display mt-1 truncate">
-                      {formatCurrency(stat.value)}
+                    <p className="text-text text-lg font-bold font-display mt-1 truncate">
+                      {stat.label === 'Total Invoice' || stat.label === 'Pending PR' 
+                        ? stat.value 
+                        : formatCurrency(stat.value)}
                     </p>
                     {stat.change !== 0 && (
                       <div className="flex items-center gap-1 mt-1">
                         {stat.change > 0 ? (
-                          <ArrowUpRight className={`w-3 h-3 text-${stat.color}`} />
+                          <ArrowUpRight className={`w-3 h-3 text-${stat.color}-600`} />
                         ) : (
-                          <ArrowDownRight className={`w-3 h-3 text-${stat.color}`} />
+                          <ArrowDownRight className={`w-3 h-3 text-${stat.color}-600`} />
                         )}
-                        <span className={`text-xs font-medium text-${stat.color}`}>
+                        <span className={`text-xs font-medium text-${stat.color}-600`}>
                           {stat.change > 0 ? '+' : ''}{stat.change.toFixed(1)}%
                         </span>
                         <span className="text-text-muted text-xs">vs bulan lalu</span>
                       </div>
                     )}
                   </div>
-                  <div className={`w-10 h-10 rounded-lg bg-${stat.color}/10 flex items-center justify-center flex-shrink-0`}>
-                    <stat.icon className={`w-5 h-5 text-${stat.color}`} strokeWidth={2} />
+                  <div className={`w-10 h-10 rounded-lg bg-${stat.color}-100 flex items-center justify-center flex-shrink-0`}>
+                    <stat.icon className={`w-5 h-5 text-${stat.color}-600`} strokeWidth={2} />
                   </div>
                 </div>
               </motion.div>
             ))}
           </div>
-          
-          {/* Additional stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-surface rounded-xl border border-border p-4">
-              <p className="text-text-muted text-xs">Total Invoice</p>
-              <p className="text-2xl font-bold">{summary?.totalInvoice || 0}</p>
-            </div>
-            <div className="bg-surface rounded-xl border border-border p-4">
-              <p className="text-text-muted text-xs">Payment Request Pending</p>
-              <p className="text-2xl font-bold text-yellow-600">{summary?.totalPaymentRequestPending || 0}</p>
-            </div>
-            <div className="bg-surface rounded-xl border border-border p-4">
-              <p className="text-text-muted text-xs">Vendor Invoice Pending</p>
-              <p className="text-2xl font-bold text-orange-600">{summary?.totalVendorInvoice || 0}</p>
-            </div>
-            <div className="bg-surface rounded-xl border border-border p-4">
-              <p className="text-text-muted text-xs">Saldo Kas</p>
-              <p className="text-2xl font-bold text-blue-600">{formatCurrency(summary?.totalKas || 0)}</p>
-            </div>
-          </div>
-          
+
           {/* ============================================ */}
-          {/* CHARTS ROW 1 */}
+          {/* CHARTS ROW 1 - Pendapatan vs Pengeluaran + Trend Laba */}
           {/* ============================================ */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Bar Chart: Pendapatan vs Pengeluaran */}
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Pendapatan vs Pengeluaran</h3>
               <div className="h-64">
-                {trendData && (
-                  <Bar
-                    data={{
-                      labels: trendData.labels,
-                      datasets: [
-                        {
-                          label: 'Pendapatan',
-                          data: trendData.pendapatan,
-                          backgroundColor: 'rgba(34, 197, 94, 0.6)',
-                          borderColor: 'rgb(34, 197, 94)',
-                          borderWidth: 1,
-                        },
-                        {
-                          label: 'Pengeluaran',
-                          data: trendData.pengeluaran,
-                          backgroundColor: 'rgba(239, 68, 68, 0.6)',
-                          borderColor: 'rgb(239, 68, 68)',
-                          borderWidth: 1,
-                        },
-                      ],
-                    }}
-                    options={barOptions}
-                  />
-                )}
+                {renderBarChart(trendData)}
               </div>
             </div>
-            
-            {/* Line Chart: Laba */}
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Trend Laba Bersih</h3>
               <div className="h-64">
-                {trendData && (
-                  <Line
-                    data={{
-                      labels: trendData.labels,
-                      datasets: [
-                        {
-                          label: 'Laba Bersih',
-                          data: trendData.laba,
-                          borderColor: 'rgb(59, 130, 246)',
-                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                          fill: true,
-                          tension: 0.3,
-                        },
-                      ],
-                    }}
-                    options={lineOptions}
-                  />
-                )}
+                {renderLineChart(trendData)}
               </div>
             </div>
           </div>
-          
+
           {/* ============================================ */}
-          {/* CHARTS ROW 2 */}
+          {/* CHARTS ROW 2 - Status Payment + Aging + Kategori */}
           {/* ============================================ */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Doughnut: Status Payment */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Status Payment Request</h3>
               <div className="h-52">
-                {statusPayment && (
-                  <Doughnut
-                    data={{
-                      labels: ['Draft', 'Submitted', 'Verified', 'Approved', 'Rejected'],
-                      datasets: [
-                        {
-                          data: [
-                            statusPayment.draft,
-                            statusPayment.submitted,
-                            statusPayment.verified,
-                            statusPayment.approved,
-                            statusPayment.rejected,
-                          ],
-                          backgroundColor: [
-                            'rgba(156, 163, 175, 0.8)',
-                            'rgba(59, 130, 246, 0.8)',
-                            'rgba(234, 179, 8, 0.8)',
-                            'rgba(34, 197, 94, 0.8)',
-                            'rgba(239, 68, 68, 0.8)',
-                          ],
-                        },
-                      ],
-                    }}
-                    options={doughnutOptions}
-                  />
-                )}
+                {renderDoughnutChart(statusPayment)}
               </div>
             </div>
-            
-            {/* Bar Chart: Aging Piutang */}
-            <div className="bg-surface rounded-xl border border-border p-5 lg:col-span-1">
+            <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Aging Piutang</h3>
               <div className="h-52">
-                {agingData && (
-                  <Bar
-                    data={{
-                      labels: ['0-30 hari', '31-60 hari', '61-90 hari', '>90 hari'],
-                      datasets: [
-                        {
-                          label: 'Piutang',
-                          data: [
-                            agingData['0-30'],
-                            agingData['31-60'],
-                            agingData['61-90'],
-                            agingData['>90'],
-                          ],
-                          backgroundColor: [
-                            'rgba(34, 197, 94, 0.7)',
-                            'rgba(234, 179, 8, 0.7)',
-                            'rgba(251, 146, 60, 0.7)',
-                            'rgba(239, 68, 68, 0.7)',
-                          ],
-                        },
-                      ],
-                    }}
-                    options={barOptions}
-                  />
-                )}
+                {renderAgingBar(agingData)}
               </div>
             </div>
-            
-            {/* Horizontal Bar: Kategori Transaksi */}
-            <div className="bg-surface rounded-xl border border-border p-5 lg:col-span-1">
+            <div className="bg-surface rounded-xl border border-border p-5">
               <h3 className="font-display font-bold text-text mb-4">Kategori Transaksi</h3>
               <div className="h-52">
-                {kategoriTransaksi && Object.keys(kategoriTransaksi).length > 0 && (
-                  <Bar
-  data={{
-    labels: Object.keys(kategoriTransaksi),
-    datasets: [
-      {
-        label: 'Jumlah',
-        data: Object.values(kategoriTransaksi),
-        backgroundColor: 'rgba(99, 102, 241, 0.7)',
-      },
-    ],
-  }}
-  options={{
-    indexAxis: 'y' as const,
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-    },
-    scales: {
-      x: {
-        beginAtZero: true,
-        ticks: {
-          callback: (value: any) => `Rp ${(value / 1000000).toFixed(0)}J`,
-        },
-      },
-    },
-  }}
-/>
-                )}
+                {renderKategoriBar(kategoriTransaksi)}
               </div>
             </div>
           </div>
-          
+
           {/* ============================================ */}
           {/* TRANSAKSI TERBARU */}
           {/* ============================================ */}
@@ -952,7 +884,7 @@ export default function Dashboard() {
                         key={idx}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        transition={{ delay: idx * 0.03 }}
+                        transition={{ delay: Math.min(idx * 0.03, 0.3) }}
                         className="hover:bg-background transition-colors cursor-pointer"
                         onClick={() => {
                           if (t.tipe === 'invoice') navigate(`/invoices/${t.id}`);
@@ -972,7 +904,7 @@ export default function Dashboard() {
                         </td>
                         <td className="px-4 py-3 text-sm truncate max-w-xs">{t.deskripsi}</td>
                         <td className={`px-4 py-3 whitespace-nowrap text-right font-mono font-semibold ${
-                          t.jumlah > 0 ? 'text-success' : 'text-danger'
+                          t.jumlah > 0 ? 'text-green-600' : 'text-red-600'
                         }`}>
                           {formatCurrency(t.jumlah)}
                         </td>
@@ -989,51 +921,6 @@ export default function Dashboard() {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-          
-          {/* ============================================ */}
-          {/* QUICK ACTIONS */}
-          {/* ============================================ */}
-          <div className="bg-surface rounded-xl border border-border p-5">
-            <h3 className="font-display font-bold text-text mb-4">Aksi Cepat</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <button
-                onClick={() => navigate('/invoices')}
-                className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-border hover:border-accent hover:bg-accent/5 transition-all group"
-              >
-                <div className="w-12 h-12 rounded-lg bg-blue-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <FileText className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-sm font-medium text-text">Faktur Penjualan</span>
-              </button>
-              <button
-                onClick={() => navigate('/purchase-invoices')}
-                className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-border hover:border-accent hover:bg-accent/5 transition-all group"
-              >
-                <div className="w-12 h-12 rounded-lg bg-purple-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Receipt className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-sm font-medium text-text">Faktur Pembelian</span>
-              </button>
-              <button
-                onClick={() => navigate('/payment-requests')}
-                className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-border hover:border-accent hover:bg-accent/5 transition-all group"
-              >
-                <div className="w-12 h-12 rounded-lg bg-yellow-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <DollarSign className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-sm font-medium text-text">Payment Request</span>
-              </button>
-              <button
-                onClick={() => navigate('/contacts')}
-                className="flex flex-col items-center gap-2 p-4 rounded-lg border-2 border-border hover:border-accent hover:bg-accent/5 transition-all group"
-              >
-                <div className="w-12 h-12 rounded-lg bg-green-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Users className="w-6 h-6 text-white" />
-                </div>
-                <span className="text-sm font-medium text-text">Kontak Baru</span>
-              </button>
             </div>
           </div>
         </>

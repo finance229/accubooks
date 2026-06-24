@@ -159,36 +159,38 @@ export default function Dashboard() {
   };
 
   // ============================================
-  // 1. SUMMARY DARI JURNAL
+  // 1. SUMMARY DARI JURNAL (SEDERHANA)
   // ============================================
   const fetchSummaryFromJournal = async (companyId: number, year: number, month: number) => {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    // ========== AMBIL SEMUA JOURNAL LINES ==========
-    const { data: allLines, error } = await supabase
-      .from('journal_lines')
-      .select(`
-        debit,
-        credit,
-        journals!inner (
-          id,
-          journal_date,
-          status,
-          company_id
-        )
-      `)
-      .eq('journals.company_id', companyId)
-      .eq('journals.status', 'posted')
-      .gte('journals.journal_date', startDate)
-      .lte('journals.journal_date', endDate);
+    // STEP 1: Ambil semua journal yang diposting dalam periode
+    const { data: journals, error: jError } = await supabase
+      .from('journals')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('status', 'posted')
+      .gte('journal_date', startDate)
+      .lte('journal_date', endDate);
     
-    if (error) {
-      console.error('Error fetching journal lines:', error);
+    if (jError || !journals || journals.length === 0) {
       return getEmptySummary();
     }
     
-    // Ambil semua COA untuk mapping
+    const journalIds = journals.map(j => j.id);
+    
+    // STEP 2: Ambil semua journal lines dari journal tersebut
+    const { data: lines, error: lError } = await supabase
+      .from('journal_lines')
+      .select('debit, credit, coa_id')
+      .in('journal_id', journalIds);
+    
+    if (lError || !lines) {
+      return getEmptySummary();
+    }
+    
+    // STEP 3: Ambil semua COA untuk mapping
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, code, name, type')
@@ -197,14 +199,14 @@ export default function Dashboard() {
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    // Hitung total per type
+    // STEP 4: Hitung
     let totalPendapatan = 0;
     let totalPengeluaran = 0;
     let totalPiutang = 0;
     let totalHutang = 0;
     let totalKas = 0;
     
-    (allLines || []).forEach((line: any) => {
+    lines.forEach((line: any) => {
       const coa = coaMap.get(line.coa_id);
       if (!coa) return;
       
@@ -212,29 +214,20 @@ export default function Dashboard() {
       const credit = line.credit || 0;
       const selisih = debit - credit;
       
-      // Pendapatan (revenue) - normal credit
       if (coa.type === 'revenue') {
         totalPendapatan += (credit - debit);
-      }
-      // Beban (expense) - normal debit
-      else if (coa.type === 'expense') {
+      } else if (coa.type === 'expense') {
         totalPengeluaran += (debit - credit);
-      }
-      // Piutang (1111)
-      else if (coa.code === '1111') {
+      } else if (coa.code === '1111') {
         totalPiutang += selisih;
-      }
-      // Hutang (2101)
-      else if (coa.code === '2101') {
+      } else if (coa.code === '2101') {
         totalHutang += (credit - debit);
-      }
-      // Kas (1101, 1102)
-      else if (coa.code.startsWith('1101') || coa.code.startsWith('1102')) {
+      } else if (coa.code.startsWith('1101') || coa.code.startsWith('1102')) {
         totalKas += selisih;
       }
     });
     
-    // ========== INVOICE COUNT ==========
+    // Invoice count
     const { count: invoiceCount } = await supabase
       .from('invoices')
       .select('*', { count: 'exact', head: true })
@@ -242,19 +235,17 @@ export default function Dashboard() {
       .gte('invoice_date', startDate)
       .lte('invoice_date', endDate);
     
-    // ========== PENDING PAYMENT REQUEST ==========
+    // Pending PR
     const { count: pendingCount } = await supabase
       .from('payment_requests')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .in('status', ['submitted', 'verified']);
     
-    const laba = totalPendapatan - totalPengeluaran;
-    
     return {
       totalPendapatan: totalPendapatan,
       totalPengeluaran: totalPengeluaran,
-      labaBersih: laba,
+      labaBersih: totalPendapatan - totalPengeluaran,
       totalPiutang: totalPiutang > 0 ? totalPiutang : 0,
       totalHutang: totalHutang > 0 ? totalHutang : 0,
       totalKas: totalKas > 0 ? totalKas : 0,
@@ -295,7 +286,7 @@ export default function Dashboard() {
     const pengeluaran = [];
     const laba = [];
     
-    // Ambil semua COA untuk mapping
+    // Ambil semua COA
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, type, code')
@@ -317,27 +308,36 @@ export default function Dashboard() {
       const start = `${y}-${String(m).padStart(2, '0')}-01`;
       const end = `${y}-${String(m).padStart(2, '0')}-31`;
       
-      const { data: lines } = await supabase
-        .from('journal_lines')
-        .select(`
-          debit,
-          credit,
-          coa_id
-        `)
-        .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted').gte('journal_date', start).lte('journal_date', end)).data?.map(j => j.id) || []);
+      // Ambil journal di periode
+      const { data: journals } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('status', 'posted')
+        .gte('journal_date', start)
+        .lte('journal_date', end);
       
+      const journalIds = journals?.map(j => j.id) || [];
       let p = 0, q = 0;
-      (lines || []).forEach((line: any) => {
-        const coa = coaMap.get(line.coa_id);
-        if (!coa) return;
-        const debit = line.debit || 0;
-        const credit = line.credit || 0;
-        if (coa.type === 'revenue') {
-          p += (credit - debit);
-        } else if (coa.type === 'expense') {
-          q += (debit - credit);
-        }
-      });
+      
+      if (journalIds.length > 0) {
+        const { data: lines } = await supabase
+          .from('journal_lines')
+          .select('debit, credit, coa_id')
+          .in('journal_id', journalIds);
+        
+        lines?.forEach((line: any) => {
+          const coa = coaMap.get(line.coa_id);
+          if (!coa) return;
+          const debit = line.debit || 0;
+          const credit = line.credit || 0;
+          if (coa.type === 'revenue') {
+            p += (credit - debit);
+          } else if (coa.type === 'expense') {
+            q += (debit - credit);
+          }
+        });
+      }
       
       pendapatan.push(p);
       pengeluaran.push(q);
@@ -400,31 +400,39 @@ export default function Dashboard() {
     
     const { data: coaList } = await supabase
       .from('coa')
-      .select('id, name, type')
+      .select('id, name')
       .eq('company_id', companyId);
     
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    const { data: lines } = await supabase
-      .from('journal_lines')
-      .select(`
-        debit,
-        credit,
-        coa_id
-      `)
-      .in('journal_id', (await supabase.from('journals').select('id').eq('company_id', companyId).eq('status', 'posted').gte('journal_date', start).lte('journal_date', end)).data?.map(j => j.id) || []);
+    const { data: journals } = await supabase
+      .from('journals')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('status', 'posted')
+      .gte('journal_date', start)
+      .lte('journal_date', end);
     
+    const journalIds = journals?.map(j => j.id) || [];
     const kategori: Record<string, number> = {};
-    (lines || []).forEach((line: any) => {
-      const coa = coaMap.get(line.coa_id);
-      if (!coa) return;
-      const amount = Math.abs((line.debit || 0) - (line.credit || 0));
-      if (amount > 0) {
-        const key = coa.name.replace('Beban ', '').replace('Pendapatan ', '');
-        kategori[key] = (kategori[key] || 0) + amount;
-      }
-    });
+    
+    if (journalIds.length > 0) {
+      const { data: lines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, coa_id')
+        .in('journal_id', journalIds);
+      
+      lines?.forEach((line: any) => {
+        const coa = coaMap.get(line.coa_id);
+        if (!coa) return;
+        const amount = Math.abs((line.debit || 0) - (line.credit || 0));
+        if (amount > 0) {
+          const key = coa.name.replace('Beban ', '').replace('Pendapatan ', '');
+          kategori[key] = (kategori[key] || 0) + amount;
+        }
+      });
+    }
     
     const sorted = Object.entries(kategori).sort((a, b) => b[1] - a[1]);
     return Object.fromEntries(sorted.slice(0, 5));
@@ -436,45 +444,39 @@ export default function Dashboard() {
   const fetchTransaksiTerbaru = async (companyId: number) => {
     const { data: journals } = await supabase
       .from('journals')
-      .select(`
-        id, journal_number, journal_date, description,
-        journal_lines!inner (
-          debit, credit,
-          coa!inner (name, type)
-        )
-      `)
+      .select('id, journal_number, journal_date, description')
       .eq('company_id', companyId)
       .eq('status', 'posted')
       .order('journal_date', { ascending: false })
       .limit(10);
     
     const results: TransaksiTerbaru[] = [];
-    (journals || []).forEach(j => {
+    
+    for (const j of journals || []) {
+      const { data: lines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit')
+        .eq('journal_id', j.id);
+      
       let total = 0;
-      let kategori = 'Lain-lain';
-      (j.journal_lines || []).forEach((line: any) => {
-        const amount = Math.abs((line.debit || 0) - (line.credit || 0));
-        if (amount > 0) {
-          total += amount;
-          if (line.coa?.type === 'revenue') kategori = 'Pendapatan';
-          else if (line.coa?.type === 'expense') kategori = 'Beban';
-          else if (line.coa?.type === 'asset') kategori = 'Aset';
-          else if (line.coa?.type === 'liability') kategori = 'Kewajiban';
-        }
+      lines?.forEach((line: any) => {
+        total += Math.abs((line.debit || 0) - (line.credit || 0));
       });
+      
       if (total > 0) {
         results.push({
           id: j.id,
           tanggal: j.journal_date,
           tipe: 'Jurnal',
-          kategori: kategori,
+          kategori: 'Umum',
           deskripsi: j.description || j.journal_number,
           jumlah: total,
           status: 'posted',
           reference: j.journal_number,
         });
       }
-    });
+    }
+    
     return results.slice(0, 10);
   };
 

@@ -61,7 +61,11 @@ export default function PaymentRequests() {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   
-  // State untuk modal buat proyek baru
+  // 🆕 STATE UNTUK COMPANY CODE DAN PREVIEW VOUCHER
+  const [companyCode, setCompanyCode] = useState<string>('');
+  const [voucherPreview, setVoucherPreview] = useState<string>('');
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
+  
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
@@ -95,8 +99,97 @@ export default function PaymentRequests() {
       fetchProjects();
       fetchCoa();
       fetchBankAccounts();
+      fetchCompanyCode();
     }
   }, [currentCompany]);
+
+  // ============================================
+  // 🆕 FETCH COMPANY CODE
+  // ============================================
+  const fetchCompanyCode = async () => {
+    if (!currentCompany?.id) {
+      console.log('⚠️ No company ID');
+      return;
+    }
+    
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', currentCompany.id)
+        .single();
+      
+      if (error) {
+        console.error('❌ Error fetching company:', error);
+        return;
+      }
+      
+      const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
+      console.log('✅ Company Code:', code);
+      setCompanyCode(code);
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+    }
+  };
+
+  // ============================================
+  // 🆕 GENERATE PREVIEW VOUCHER OTOMATIS
+  // ============================================
+  const generateVoucherPreview = async () => {
+    if (!currentCompany?.id || !companyCode) {
+      setVoucherPreview('');
+      return;
+    }
+
+    setIsGeneratingPreview(true);
+
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      
+      const projectId = verifyData.projectId;
+      const project = projects.find(p => p.id === projectId);
+      const projectCode = project?.code || '';
+
+      let basePattern = `${companyCode}/${year}/${month}`;
+      if (projectCode) {
+        basePattern += `/${projectCode}`;
+      }
+
+      // Cari nomor terakhir dari payment_requests
+      const { data: existingVouchers } = await supabase
+        .from('payment_requests')
+        .select('voucher_no')
+        .ilike('voucher_no', `${basePattern}/%`)
+        .order('voucher_no', { ascending: false })
+        .limit(1);
+
+      let lastNumber = 0;
+      if (existingVouchers && existingVouchers.length > 0) {
+        const parts = existingVouchers[0].voucher_no.split('/');
+        const lastPart = parts[parts.length - 1];
+        lastNumber = parseInt(lastPart) || 0;
+      }
+
+      const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+      const preview = `${basePattern}/${nextNumber}`;
+      
+      setVoucherPreview(preview);
+    } catch (error) {
+      console.error('❌ Error generating preview:', error);
+      setVoucherPreview('(gagal generate)');
+    } finally {
+      setIsGeneratingPreview(false);
+    }
+  };
+
+  // Auto-generate preview saat project berubah
+  useEffect(() => {
+    if (companyCode) {
+      generateVoucherPreview();
+    }
+  }, [companyCode, verifyData.projectId, projects]);
 
   const fetchRequests = async () => {
     if (!currentCompany?.id) return;
@@ -272,12 +365,36 @@ export default function PaymentRequests() {
 
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
-    const projectCode = projects.find(p => p.id === verifyData.projectId)?.code || null;
-const voucherCode = await generateVoucherNo(
-  currentCompany!.id,
-  new Date(),
-  projectCode
-);
+    
+    // 🔴 GENERATE VOUCHER NO (SAMA PERSIS DENGAN PREVIEW)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const project = projects.find(p => p.id === verifyData.projectId);
+    const projectCode = project?.code || '';
+
+    let basePattern = `${companyCode}/${year}/${month}`;
+    if (projectCode) {
+      basePattern += `/${projectCode}`;
+    }
+
+    // Cari nomor terakhir dari payment_requests
+    const { data: existingVouchers } = await supabase
+      .from('payment_requests')
+      .select('voucher_no')
+      .ilike('voucher_no', `${basePattern}/%`)
+      .order('voucher_no', { ascending: false })
+      .limit(1);
+
+    let lastNumber = 0;
+    if (existingVouchers && existingVouchers.length > 0) {
+      const parts = existingVouchers[0].voucher_no.split('/');
+      const lastPart = parts[parts.length - 1];
+      lastNumber = parseInt(lastPart) || 0;
+    }
+
+    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+    const voucherCode = `${basePattern}/${nextNumber}`;
 
     // Update project spent
     await updateProjectSpent(verifyData.projectId, request.amount);
@@ -316,10 +433,12 @@ const voucherCode = await generateVoucherNo(
         total_with_tax: totalAmount,
       })
       .eq('id', request.id);
+      
     if (error) {
       alert('Gagal update: ' + error.message);
       return;
     }
+    
     await addPaymentLog(request.id, request.status, 'verified', `Voucher: ${voucherCode}, Jurnal accrual: ${journalId}`);
     fetchRequests();
     setShowVerifyModal(false);
@@ -515,6 +634,23 @@ const voucherCode = await generateVoucherNo(
                   <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5">+ Baru</button>
                 </div>
               </div>
+              
+              {/* 🆕 PREVIEW VOUCHER - OTOMATIS BERUBAH SAAT PROJECT BERUBAH */}
+              <div>
+                <label className="block font-medium">Preview Voucher</label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    value={isGeneratingPreview ? 'Loading...' : voucherPreview} 
+                    readOnly 
+                    className="flex-1 px-4 py-2 border rounded-lg bg-gray-50 font-mono text-sm"
+                  />
+                </div>
+                <p className="text-xs text-text-muted mt-1">
+                  Voucher akan digenerate otomatis saat verifikasi
+                </p>
+              </div>
+              
               <div>
                 <label className="block font-medium">Akun Debit (Beban/Aset)</label>
                 <select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">

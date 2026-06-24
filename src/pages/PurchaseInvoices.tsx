@@ -142,71 +142,92 @@ export default function PurchaseInvoices() {
     }
   }, [currentCompany]);
 
-  const fetchCompanyCode = async () => {
-    if (!currentCompany?.id) return;
-    const { data } = await supabase
+ const fetchCompanyCode = async () => {
+  if (!currentCompany?.id) {
+    console.log('⚠️ No company ID');
+    return;
+  }
+  
+  console.log('🔍 Fetching company code for ID:', currentCompany.id);
+  
+  try {
+    const { data, error } = await supabase
       .from('companies')
-      .select('code')
+      .select('*')
       .eq('id', currentCompany.id)
       .single();
-    if (data) {
-      setCompanyCode(data.code);
+    
+    if (error) {
+      console.error('❌ Error fetching company:', error);
+      return;
     }
-  };
+    
+    console.log('✅ Company data:', data);
+    
+    // Coba berbagai kemungkinan nama kolom
+    const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
+    console.log('✅ Company Code:', code);
+    setCompanyCode(code);
+  } catch (err) {
+    console.error('❌ Fetch error:', err);
+  }
+};
 
   // ============================================
   // 🆕 GENERATE PREVIEW VOUCHER OTOMATIS
   // ============================================
-  const generateVoucherPreview = async () => {
-    if (!currentCompany?.id || !companyCode) {
-      setVoucherPreview('');
-      return;
+ const generateVoucherPreview = async () => {
+  console.log('🔍 Generating preview - companyCode:', companyCode);
+  
+  if (!currentCompany?.id || !companyCode) {
+    setVoucherPreview('');
+    return;
+  }
+
+  setIsGeneratingPreview(true);
+
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    
+    const projectId = verifyData.projectId || formData.project_id;
+    const project = projects.find(p => p.id === projectId);
+    const projectCode = project?.code || '';
+
+    let basePattern = `${companyCode}/${year}/${month}`;
+    if (projectCode) {
+      basePattern += `/${projectCode}`;
     }
 
-    setIsGeneratingPreview(true);
+    console.log('🔍 Base pattern:', basePattern);
 
-    try {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      
-      // Ambil project code dari state verifyData atau formData
-      const projectId = verifyData.projectId || formData.project_id;
-      const project = projects.find(p => p.id === projectId);
-      const projectCode = project?.code || '';
+    const { data: existingVouchers } = await supabase
+      .from('vendor_invoices')
+      .select('voucher_no')
+      .ilike('voucher_no', `${basePattern}/%`)
+      .order('voucher_no', { ascending: false })
+      .limit(1);
 
-      // Base pattern: COMPANY/YEAR/MONTH[/PROJECT]
-      let basePattern = `${companyCode}/${year}/${month}`;
-      if (projectCode) {
-        basePattern += `/${projectCode}`;
-      }
-
-      // Cari nomor terakhir dari database
-      const { data: existingVouchers } = await supabase
-        .from('vendor_invoices')
-        .select('voucher_no')
-        .ilike('voucher_no', `${basePattern}/%`)
-        .order('voucher_no', { ascending: false })
-        .limit(1);
-
-      let lastNumber = 0;
-      if (existingVouchers && existingVouchers.length > 0) {
-        const parts = existingVouchers[0].voucher_no.split('/');
-        const lastPart = parts[parts.length - 1];
-        lastNumber = parseInt(lastPart) || 0;
-      }
-
-      const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-      const preview = `${basePattern}/${nextNumber}`;
-      
-      setVoucherPreview(preview);
-    } catch (error) {
-      console.error('Error generating preview:', error);
-      setVoucherPreview('(gagal generate)');
-    } finally {
-      setIsGeneratingPreview(false);
+    let lastNumber = 0;
+    if (existingVouchers && existingVouchers.length > 0) {
+      const parts = existingVouchers[0].voucher_no.split('/');
+      const lastPart = parts[parts.length - 1];
+      lastNumber = parseInt(lastPart) || 0;
     }
-  };
+
+    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+    const preview = `${basePattern}/${nextNumber}`;
+    
+    console.log('✅ Preview voucher:', preview);
+    setVoucherPreview(preview);
+  } catch (error) {
+    console.error('❌ Error generating preview:', error);
+    setVoucherPreview('(gagal generate)');
+  } finally {
+    setIsGeneratingPreview(false);
+  }
+};
 
   // 🆕 Auto-generate preview saat project atau company berubah
   useEffect(() => {
@@ -478,6 +499,17 @@ export default function PurchaseInvoices() {
       alert('Budget tidak cukup. Tidak bisa verifikasi.');
       return;
     }
+
+    // Di handleVerify, kalau companyCode kosong, ambil dari database langsung
+let finalCompanyCode = companyCode;
+if (!finalCompanyCode) {
+  const { data } = await supabase
+    .from('companies')
+    .select('*')
+    .eq('id', currentCompany!.id)
+    .single();
+  finalCompanyCode = data?.code || data?.name?.substring(0, 4).toUpperCase() || 'COMP';
+}
 
     // 🔴 GENERATE VOUCHER NO (SAMA PERSIS DENGAN PREVIEW)
     const now = new Date();

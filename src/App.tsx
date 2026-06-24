@@ -24,6 +24,7 @@ import PurchaseInvoices from './pages/PurchaseInvoices';
 import IncomeStatement from './pages/IncomeStatement';
 import BalanceSheet from './pages/BalanceSheet';
 import RecurringTransactions from './pages/RecurringTransactions';
+import ReportsGeneral from './pages/ReportsGeneral';
 
 function App() {
   return (
@@ -58,6 +59,7 @@ function App() {
               <Route path="income-statement" element={<IncomeStatement />} />
               <Route path="balance-sheet" element={<BalanceSheet />} />
               <Route path="recurring-transactions" element={<RecurringTransactions />} />
+              <Route path="reports-general" element={<ReportsGeneral />} />
             </Route>
           </Routes>
         </CompanyProvider>

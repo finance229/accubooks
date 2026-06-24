@@ -80,8 +80,12 @@ export default function Invoices() {
   const [paymentMethod, setPaymentMethod] = useState('transfer');
   const [selectedBankId, setSelectedBankId] = useState(0);
   
+  // EDIT STATE
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  
+  // ADDITIONAL LABEL STATE (bisa diubah user)
+  const [additionalLabel, setAdditionalLabel] = useState('Additional');
   
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', email: '', phone: '', address: '' });
@@ -790,6 +794,7 @@ export default function Invoices() {
         </div>
       </div>
 
+      {/* ========== MODAL BUAT INVOICE ========== */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
@@ -805,7 +810,15 @@ export default function Invoices() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-2 py-2 text-left text-xs">Deskripsi</th>
-                        <th className="px-2 py-2 text-left text-xs">Additional</th>
+                        <th className="px-2 py-2 text-left text-xs">
+                          <input
+                            type="text"
+                            value={additionalLabel}
+                            onChange={(e) => setAdditionalLabel(e.target.value)}
+                            placeholder="Judul kolom..."
+                            className="w-full px-1 py-0.5 border border-dashed border-gray-300 rounded text-xs bg-transparent focus:border-accent focus:outline-none"
+                          />
+                        </th>
                         <th className="px-2 py-2 text-center w-16">Qty</th>
                         <th className="px-2 py-2 text-right w-28">Harga</th>
                         <th className="px-2 py-2 text-right w-28">Jumlah</th>
@@ -848,6 +861,7 @@ export default function Invoices() {
         </div>
       )}
 
+      {/* ========== MODAL EDIT INVOICE ========== */}
       {showEditModal && editingInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
@@ -863,7 +877,15 @@ export default function Invoices() {
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-2 py-2 text-left text-xs">Deskripsi</th>
-                        <th className="px-2 py-2 text-left text-xs">Additional</th>
+                        <th className="px-2 py-2 text-left text-xs">
+                          <input
+                            type="text"
+                            value={additionalLabel}
+                            onChange={(e) => setAdditionalLabel(e.target.value)}
+                            placeholder="Judul kolom..."
+                            className="w-full px-1 py-0.5 border border-dashed border-gray-300 rounded text-xs bg-transparent focus:border-accent focus:outline-none"
+                          />
+                        </th>
                         <th className="px-2 py-2 text-center w-16">Qty</th>
                         <th className="px-2 py-2 text-right w-28">Harga</th>
                         <th className="px-2 py-2 text-right w-28">Jumlah</th>
@@ -906,6 +928,7 @@ export default function Invoices() {
         </div>
       )}
 
+      {/* ========== MODAL PAYMENT ========== */}
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -923,12 +946,16 @@ export default function Invoices() {
         </div>
       )}
 
+      {/* ========== MODAL CUSTOMER BARU ========== */}
       {showNewCustomerModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Tambah Customer</h2><div className="space-y-3"><input type="text" placeholder="Nama *" value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="email" placeholder="Email" value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Telepon" value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><textarea placeholder="Alamat" rows={2} value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowNewCustomerModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateCustomer} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button></div></div></div>)}
 
+      {/* ========== MODAL PROYEK BARU ========== */}
       {showNewProjectModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Tambah Proyek</h2><div className="space-y-3"><input type="text" placeholder="Kode *" value={newProject.code} onChange={e => setNewProject({...newProject, code: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Nama *" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Anggaran" value={newProject.budget || ''} onChange={e => setNewProject({...newProject, budget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowNewProjectModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateProject} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button></div></div></div>)}
 
+      {/* ========== MODAL DETAIL ========== */}
       {showDetailModal && selectedInvoice && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-lg"><div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Invoice</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div><div className="space-y-2 mt-4"><p><strong>No:</strong> {selectedInvoice.invoice_number}</p><p><strong>Customer:</strong> {selectedInvoice.customer_name}</p><p><strong>Tanggal:</strong> {selectedInvoice.invoice_date}</p><p><strong>Jatuh Tempo:</strong> {selectedInvoice.due_date}</p><p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p><p><strong>Sudah Dibayar:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}</p><p><strong>Sisa:</strong> {formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p><p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p></div><div className="flex justify-end mt-6"><button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button></div></div></div>)}
 
+      {/* ========== AGING MODAL ========== */}
       {showAgingModal && (
         <AgingModal
           isOpen={showAgingModal}

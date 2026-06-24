@@ -159,38 +159,48 @@ export default function Dashboard() {
   };
 
   // ============================================
-  // 1. SUMMARY DARI JURNAL (SEDERHANA)
+  // 1. SUMMARY DARI JURNAL
   // ============================================
   const fetchSummaryFromJournal = async (companyId: number, year: number, month: number) => {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    // STEP 1: Ambil semua journal yang diposting dalam periode
+    // ✅ AMBIL SEMUA JOURNAL YANG SUDAH POSTED (tanpa filter tanggal dulu)
     const { data: journals, error: jError } = await supabase
       .from('journals')
-      .select('id')
+      .select('id, journal_date')
       .eq('company_id', companyId)
-      .eq('status', 'posted')
-      .gte('journal_date', startDate)
-      .lte('journal_date', endDate);
+      .eq('status', 'posted');
     
-    if (jError || !journals || journals.length === 0) {
+    if (jError || !journals) {
+      console.error('Error fetching journals:', jError);
       return getEmptySummary();
     }
     
-    const journalIds = journals.map(j => j.id);
+    // ✅ Filter tanggal di JavaScript
+    const filteredJournals = journals.filter(j => {
+      const date = new Date(j.journal_date);
+      return date >= new Date(startDate) && date <= new Date(endDate);
+    });
     
-    // STEP 2: Ambil semua journal lines dari journal tersebut
+    const journalIds = filteredJournals.map(j => j.id);
+    
+    if (journalIds.length === 0) {
+      return getEmptySummary();
+    }
+    
+    // ✅ Ambil journal lines
     const { data: lines, error: lError } = await supabase
       .from('journal_lines')
       .select('debit, credit, coa_id')
       .in('journal_id', journalIds);
     
     if (lError || !lines) {
+      console.error('Error fetching journal lines:', lError);
       return getEmptySummary();
     }
     
-    // STEP 3: Ambil semua COA untuk mapping
+    // ✅ Ambil semua COA
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, code, name, type')
@@ -199,7 +209,7 @@ export default function Dashboard() {
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    // STEP 4: Hitung
+    // ✅ Hitung
     let totalPendapatan = 0;
     let totalPengeluaran = 0;
     let totalPiutang = 0;
@@ -278,7 +288,7 @@ export default function Dashboard() {
   });
 
   // ============================================
-  // 2. TREND DARI JURNAL (6 BULAN)
+  // 2. TREND DARI JURNAL (6 BULAN) - DI-SEDERHANAKAN
   // ============================================
   const fetchTrendFromJournal = async (companyId: number, year: number, month: number) => {
     const months = [];
@@ -286,14 +296,36 @@ export default function Dashboard() {
     const pengeluaran = [];
     const laba = [];
     
-    // Ambil semua COA
+    // Ambil semua journal + lines sekali
+    const { data: allJournals } = await supabase
+      .from('journals')
+      .select('id, journal_date')
+      .eq('company_id', companyId)
+      .eq('status', 'posted');
+    
+    const allJournalIds = allJournals?.map(j => j.id) || [];
+    
+    let allLines: any[] = [];
+    if (allJournalIds.length > 0) {
+      const { data: lines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, coa_id')
+        .in('journal_id', allJournalIds);
+      allLines = lines || [];
+    }
+    
+    // Ambil COA
     const { data: coaList } = await supabase
       .from('coa')
-      .select('id, type, code')
+      .select('id, type')
       .eq('company_id', companyId);
     
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
+    
+    // Buat map journal_date per id
+    const journalDateMap = new Map();
+    allJournals?.forEach(j => journalDateMap.set(j.id, j.journal_date));
     
     for (let i = 5; i >= 0; i--) {
       let m = month - i;
@@ -308,36 +340,23 @@ export default function Dashboard() {
       const start = `${y}-${String(m).padStart(2, '0')}-01`;
       const end = `${y}-${String(m).padStart(2, '0')}-31`;
       
-      // Ambil journal di periode
-      const { data: journals } = await supabase
-        .from('journals')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('status', 'posted')
-        .gte('journal_date', start)
-        .lte('journal_date', end);
-      
-      const journalIds = journals?.map(j => j.id) || [];
+      // Filter lines berdasarkan tanggal journal
       let p = 0, q = 0;
-      
-      if (journalIds.length > 0) {
-        const { data: lines } = await supabase
-          .from('journal_lines')
-          .select('debit, credit, coa_id')
-          .in('journal_id', journalIds);
+      allLines.forEach((line: any) => {
+        const journalDate = journalDateMap.get(line.journal_id);
+        if (!journalDate) return;
+        if (journalDate < start || journalDate > end) return;
         
-        lines?.forEach((line: any) => {
-          const coa = coaMap.get(line.coa_id);
-          if (!coa) return;
-          const debit = line.debit || 0;
-          const credit = line.credit || 0;
-          if (coa.type === 'revenue') {
-            p += (credit - debit);
-          } else if (coa.type === 'expense') {
-            q += (debit - credit);
-          }
-        });
-      }
+        const coa = coaMap.get(line.coa_id);
+        if (!coa) return;
+        const debit = line.debit || 0;
+        const credit = line.credit || 0;
+        if (coa.type === 'revenue') {
+          p += (credit - debit);
+        } else if (coa.type === 'expense') {
+          q += (debit - credit);
+        }
+      });
       
       pendapatan.push(p);
       pengeluaran.push(q);
@@ -408,20 +427,21 @@ export default function Dashboard() {
     
     const { data: journals } = await supabase
       .from('journals')
-      .select('id')
+      .select('id, journal_date')
       .eq('company_id', companyId)
-      .eq('status', 'posted')
-      .gte('journal_date', start)
-      .lte('journal_date', end);
+      .eq('status', 'posted');
     
-    const journalIds = journals?.map(j => j.id) || [];
+    const filteredJournalIds = journals
+      ?.filter(j => j.journal_date >= start && j.journal_date <= end)
+      .map(j => j.id) || [];
+    
     const kategori: Record<string, number> = {};
     
-    if (journalIds.length > 0) {
+    if (filteredJournalIds.length > 0) {
       const { data: lines } = await supabase
         .from('journal_lines')
         .select('debit, credit, coa_id')
-        .in('journal_id', journalIds);
+        .in('journal_id', filteredJournalIds);
       
       lines?.forEach((line: any) => {
         const coa = coaMap.get(line.coa_id);
@@ -481,7 +501,7 @@ export default function Dashboard() {
   };
 
   // ============================================
-  // RENDER HELPERS
+  // RENDER HELPERS (sama seperti sebelumnya)
   // ============================================
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {

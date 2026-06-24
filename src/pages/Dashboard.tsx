@@ -165,7 +165,7 @@ export default function Dashboard() {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    // ✅ AMBIL SEMUA JOURNAL YANG SUDAH POSTED (tanpa filter tanggal dulu)
+    // Ambil semua journal yang sudah diposting
     const { data: journals, error: jError } = await supabase
       .from('journals')
       .select('id, journal_date')
@@ -177,7 +177,7 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // ✅ Filter tanggal di JavaScript
+    // Filter tanggal di JavaScript
     const filteredJournals = journals.filter(j => {
       const date = new Date(j.journal_date);
       return date >= new Date(startDate) && date <= new Date(endDate);
@@ -189,7 +189,7 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // ✅ Ambil journal lines
+    // Ambil journal lines
     const { data: lines, error: lError } = await supabase
       .from('journal_lines')
       .select('debit, credit, coa_id')
@@ -200,7 +200,7 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // ✅ Ambil semua COA
+    // Ambil semua COA
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, code, name, type')
@@ -209,7 +209,7 @@ export default function Dashboard() {
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    // ✅ Hitung
+    // Hitung
     let totalPendapatan = 0;
     let totalPengeluaran = 0;
     let totalPiutang = 0;
@@ -288,7 +288,7 @@ export default function Dashboard() {
   });
 
   // ============================================
-  // 2. TREND DARI JURNAL (6 BULAN) - DI-SEDERHANAKAN
+  // 2. TREND DARI JURNAL (6 BULAN) - PERBAIKAN
   // ============================================
   const fetchTrendFromJournal = async (companyId: number, year: number, month: number) => {
     const months = [];
@@ -309,7 +309,7 @@ export default function Dashboard() {
     if (allJournalIds.length > 0) {
       const { data: lines } = await supabase
         .from('journal_lines')
-        .select('debit, credit, coa_id')
+        .select('debit, credit, coa_id, journal_id')
         .in('journal_id', allJournalIds);
       allLines = lines || [];
     }

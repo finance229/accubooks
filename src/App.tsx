@@ -21,7 +21,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Vendors from './pages/Vendors';
 import PurchaseInvoices from './pages/PurchaseInvoices';
 // TAMBAHKAN IMPORT INI
-import IncomeStatement from './pages/IncomeStatement';
+import { IncomeStatement } from './pages/IncomeStatement';
 import BalanceSheet from './pages/BalanceSheet';
 import RecurringTransactions from './pages/RecurringTransactions';
 import ReportsGeneral from './pages/ReportsGeneral';

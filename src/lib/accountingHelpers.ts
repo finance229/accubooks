@@ -1,10 +1,5 @@
 import { supabase } from './supabase';
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
-// Format currency
 export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -13,25 +8,20 @@ export const formatCurrency = (amount: number) => {
   }).format(Math.abs(amount));
 };
 
-// Format number tanpa Rp
 export const formatNumber = (amount: number) => {
   return new Intl.NumberFormat('id-ID').format(amount);
 };
 
-// Mendapatkan suffix berdasarkan company_id
-export const getCompanySuffix = (companyId: number): string => {
+export const getCompanySuffix = (_companyId: number): string => {
   const suffixMap: Record<number, string> = {
-    1: 'A',  // ARKO
-    2: 'B',  // MMC
-    3: 'C',  // USA
+    1: 'A',
+    2: 'B',
+    3: 'C',
   };
-  return suffixMap[companyId] || 'A';
+  return suffixMap[_companyId] || 'A';
 };
 
-// ============================================
-// GENERATE VOUCHER CODE
-// ============================================
-export const generateVoucherCode = async (companyId: number, projectCode: string, date: Date): Promise<string> => {
+export const generateVoucherCode = async (_companyId: number, projectCode: string, date: Date): Promise<string> => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const base = `${year}/${month}/${projectCode}`;
@@ -54,9 +44,6 @@ export const generateVoucherCode = async (companyId: number, projectCode: string
   return `${base}/${nextNumber}`;
 };
 
-// ============================================
-// BUDGET PROJECT
-// ============================================
 export const checkProjectBudget = async (projectId: number, amount: number) => {
   const { data: project, error } = await supabase
     .from('projects')
@@ -95,46 +82,31 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
   return !error;
 };
 
-// ============================================
-// GET DEFAULT ACCOUNTS
-// ============================================
 export const getDefaultAccount = async (companyId: number, type: string) => {
   const suffix = getCompanySuffix(companyId);
   
-  // Mapping kode akun (tanpa suffix)
   const mapping: Record<string, string> = {
-    // Aset
-    receivable: '1111',      // Piutang Usaha
-    ppn_in: '1131',          // PPN Masukan
-    cash: '1101',            // Kas Kecil
-    
-    // Bank accounts
-    bank_mandiri: '1102-01', // Bank Mandiri
-    bank_bca: '1102-02',     // Bank BCA
-    bank_bri: '1102-03',     // Bank BRI
-    bank_bsi: '1102-04',     // Bank BSI
-    bank_bni: '1102-05',     // Bank BNI
-    
-    // Liabilitas
-    payable: '2101',         // Utang Usaha
-    ppn_out: '2103-01',      // PPN Keluaran
-    pph21: '2103-02',        // Utang PPh 21
-    pph23: '2103-03',        // Utang PPh 23
-    pph25: '2103-04',        // Utang PPh 25
-    
-    // Ekuitas
-    capital: '3101',         // Modal Disetor
-    retained_earnings: '3102', // Laba Ditahan
-    
-    // Pendapatan
-    revenue: '4101',         // Pendapatan Jasa
-    revenue_other: '4102',   // Pendapatan Lain-lain
-    
-    // Beban
-    expense_salary: '5101',  // Beban Gaji
-    expense_rent: '5111',    // Beban Sewa
-    expense_electricity: '5112', // Beban Listrik
-    expense_depreciation: '5152', // Beban Penyusutan
+    receivable: '1111',
+    ppn_in: '1131',
+    cash: '1101',
+    bank_mandiri: '1102-01',
+    bank_bca: '1102-02',
+    bank_bri: '1102-03',
+    bank_bsi: '1102-04',
+    bank_bni: '1102-05',
+    payable: '2101',
+    ppn_out: '2103-01',
+    pph21: '2103-02',
+    pph23: '2103-03',
+    pph25: '2103-04',
+    capital: '3101',
+    retained_earnings: '3102',
+    revenue: '4101',
+    revenue_other: '4102',
+    expense_salary: '5101',
+    expense_rent: '5111',
+    expense_electricity: '5112',
+    expense_depreciation: '5152',
   };
   
   const baseCode = mapping[type];
@@ -143,13 +115,12 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
     return null;
   }
   
-  // 🔴 PERUBAHAN: Cari berdasarkan code (tanpa suffix) DAN suffix
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')
     .eq('company_id', companyId)
     .eq('code', baseCode)
-    .eq('suffix', suffix)  // ← TAMBAHKAN INI!
+    .eq('suffix', suffix)
     .single();
   
   if (error) {
@@ -159,9 +130,6 @@ export const getDefaultAccount = async (companyId: number, type: string) => {
   return data;
 };
 
-// ============================================
-// GET ALL ACCOUNTS BY TYPE
-// ============================================
 export const getBankAccounts = async (companyId: number) => {
   try {
     const suffix = getCompanySuffix(companyId);
@@ -179,20 +147,19 @@ export const getBankAccounts = async (companyId: number) => {
       return [];
     }
     
-    // Filter untuk akun bank (nama mengandung Bank atau Kas)
     const bankAccounts = (data || []).filter(acc => 
       acc.name.toLowerCase().includes('bank') || 
       acc.name.toLowerCase().includes('kas')
     );
-    
-    console.log('getBankAccounts result:', bankAccounts); // Debug
     
     return bankAccounts;
   } catch (err) {
     console.error('Error getBankAccounts:', err);
     return [];
   }
-};export const getExpenseAccounts = async (companyId: number) => {
+};
+
+export const getExpenseAccounts = async (companyId: number) => {
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')
@@ -230,10 +197,6 @@ export const getAllAccounts = async (companyId: number) => {
   return data || [];
 };
 
-// ============================================
-// CREATE JOURNAL
-// ============================================
-// Helper: get next journal number
 async function getNextJournalNumber(companyId: number, year: number): Promise<number> {
   const prefix = `JU-${year}-`;
   const { data } = await supabase
@@ -248,7 +211,6 @@ async function getNextJournalNumber(companyId: number, year: number): Promise<nu
   return isNaN(lastNumber) ? 1 : lastNumber + 1;
 }
 
-// Jurnal accrual (saat verifikasi)
 export const createAccrualJournal = async (
   companyId: number,
   date: string,
@@ -257,7 +219,7 @@ export const createAccrualJournal = async (
   debitAccountId: number,
   creditAccountId: number,
   amount: number,
-  projectId?: number
+  _projectId?: number
 ) => {
   const { data: debitAcc } = await supabase
     .from('coa')
@@ -303,7 +265,6 @@ export const createAccrualJournal = async (
   return journal.id;
 };
 
-// Jurnal pembayaran (saat approve)
 export const createPaymentJournal = async (
   companyId: number,
   date: string,
@@ -312,7 +273,7 @@ export const createPaymentJournal = async (
   liabilityAccountId: number,
   bankAccountId: number,
   amount: number,
-  projectId?: number
+  _projectId?: number
 ) => {
   const { data: liabilityAcc } = await supabase
     .from('coa')
@@ -358,7 +319,6 @@ export const createPaymentJournal = async (
   return journal.id;
 };
 
-// Jurnal umum (untuk AR, AP, dll)
 export const createGeneralJournal = async (
   companyId: number,
   date: string,
@@ -439,9 +399,6 @@ export const createGeneralJournal = async (
   }
 };
 
-// ============================================
-// LOG PAYMENT REQUEST ACTIVITY
-// ============================================
 export const addPaymentLog = async (requestId: number, oldStatus: string, newStatus: string, notes: string) => {
   const { data: user } = await supabase.auth.getUser();
   const email = user.user?.email || 'system';
@@ -455,9 +412,6 @@ export const addPaymentLog = async (requestId: number, oldStatus: string, newSta
   });
 };
 
-// ============================================
-// CREATE CUSTOMER / VENDOR / PROJECT
-// ============================================
 export const createCustomerIfNotExist = async (
   companyId: number,
   name: string,
@@ -532,9 +486,6 @@ export const createVendorIfNotExist = async (
   return newVendor.id;
 };
 
-// ============================================
-// GENERATE INVOICE NO & VOUCHER NO
-// ============================================
 export const generateInvoiceNo = async (
   companyId: number,
   date: Date,

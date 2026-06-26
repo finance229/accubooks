@@ -82,7 +82,7 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
   return !error;
 };
 
-export const getDefaultAccount = async (companyId: number, type: string) => {
+export const getDefaultAccount = async (_companyId: number, type: string) => {
   const suffix = getCompanySuffix(companyId);
   
   const mapping: Record<string, string> = {

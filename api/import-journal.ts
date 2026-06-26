@@ -1,8 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabase } from '../src/lib/supabase';
 import { createGeneralJournal } from '../src/lib/accountingHelpers';
-import { parseExcelFile, ImportPreview } from '../src/lib/excelParser';
-import * as XLSX from 'xlsx';
+import { parseExcelFile } from '../src/lib/excelParser';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();

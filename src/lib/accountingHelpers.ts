@@ -83,7 +83,7 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
 };
 
 export const getDefaultAccount = async (_companyId: number, type: string) => {
-  const suffix = getCompanySuffix(companyId);
+  const suffix = getCompanySuffix(_companyId);
   
   const mapping: Record<string, string> = {
     receivable: '1111',
@@ -118,13 +118,13 @@ export const getDefaultAccount = async (_companyId: number, type: string) => {
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')
-    .eq('company_id', companyId)
+    .eq('company_id', _companyId)
     .eq('code', baseCode)
     .eq('suffix', suffix)
     .single();
   
   if (error) {
-    console.error(`Akun ${type} (${baseCode}-${suffix}) tidak ditemukan untuk company ${companyId}`);
+    console.error(`Akun ${type} (${baseCode}-${suffix}) tidak ditemukan untuk company ${_companyId}`);
     return null;
   }
   return data;

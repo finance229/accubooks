@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2, Upload, CheckDouble } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2, Upload, CheckSquare } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
@@ -418,8 +418,8 @@ export default function JournalEntries() {
             disabled={postingAll}
             className="flex items-center gap-2 px-4 py-2.5 bg-success/10 text-success border border-success/30 rounded-lg hover:bg-success/20 transition-colors disabled:opacity-50"
           >
-            <CheckDouble className="w-5 h-5" />
-            Post All Drafts
+            <CheckSquare className="w-5 h-5" />
+Post All Drafts
           </button>
           {/* TOMBOL BUAT JURNAL */}
           <button

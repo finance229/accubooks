@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2 } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2, Upload, CheckDouble } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../lib/accountingHelpers';
+import ImportJournalModal from '../components/ImportJournalModal';
 
 type JournalLine = {
   id?: number;
@@ -43,6 +44,11 @@ export default function JournalEntries() {
   const [showUnpostModal, setShowUnpostModal] = useState(false);
   const [unpostReason, setUnpostReason] = useState('');
   const [unpostTargetId, setUnpostTargetId] = useState<number | null>(null);
+  
+  // STATE UNTUK IMPORT EXCEL
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [postingAll, setPostingAll] = useState(false);
+  
   const [newJournal, setNewJournal] = useState({
     journal_date: new Date().toISOString().split('T')[0],
     description: '',
@@ -102,8 +108,47 @@ export default function JournalEntries() {
     setProjects(data || []);
   };
 
+  // ============================================
+  // POST ALL DRAFTS
+  // ============================================
+  const handlePostAllDrafts = async () => {
+    if (!confirm('Posting semua jurnal yang berstatus DRAFT?')) return;
+    
+    setPostingAll(true);
+    try {
+      const { data: drafts } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('company_id', currentCompany!.id)
+        .eq('status', 'draft');
+      
+      if (!drafts || drafts.length === 0) {
+        alert('Tidak ada jurnal draft');
+        setPostingAll(false);
+        return;
+      }
+
+      const ids = drafts.map(d => d.id);
+      const { error } = await supabase
+        .from('journals')
+        .update({ 
+          status: 'posted', 
+          posted_by: user?.email || 'system',
+          posted_at: new Date().toISOString()
+        })
+        .in('id', ids);
+
+      if (error) throw error;
+      alert(`${ids.length} jurnal berhasil diposting`);
+      fetchJournals();
+    } catch (error: any) {
+      alert('Gagal posting: ' + error.message);
+    } finally {
+      setPostingAll(false);
+    }
+  };
+
   const handleSaveJournal = async () => {
-    // Validasi
     if (!newJournal.description) {
       alert('Deskripsi jurnal wajib diisi');
       return;
@@ -125,7 +170,6 @@ export default function JournalEntries() {
     const year = new Date().getFullYear();
     
     if (editingJournal) {
-      // UPDATE existing journal
       const { error: journalError } = await supabase
         .from('journals')
         .update({
@@ -140,10 +184,8 @@ export default function JournalEntries() {
         return;
       }
 
-      // Hapus lines lama
       await supabase.from('journal_lines').delete().eq('journal_id', editingJournal.id);
 
-      // Insert lines baru
       const linesToInsert = newJournal.lines.map(line => ({
         journal_id: editingJournal.id,
         coa_id: line.coa_id,
@@ -164,7 +206,6 @@ export default function JournalEntries() {
 
       alert('Jurnal berhasil diupdate');
     } else {
-      // CREATE new journal
       const { data: lastJournal } = await supabase
         .from('journals')
         .select('journal_number')
@@ -362,9 +403,32 @@ export default function JournalEntries() {
           <h1 className="font-display text-3xl font-bold text-text">Jurnal Umum</h1>
           <p className="text-text-muted mt-1">Input dan kelola jurnal akuntansi dengan validasi debit/kredit</p>
         </div>
-        <button onClick={() => { resetForm(); setShowAddModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
-          <Plus className="w-5 h-5" strokeWidth={2} /> Buat Jurnal
-        </button>
+        <div className="flex gap-3">
+          {/* TOMBOL IMPORT EXCEL */}
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 text-blue-600 border border-blue-500/30 rounded-lg hover:bg-blue-500/20 transition-colors"
+          >
+            <Upload className="w-5 h-5" />
+            Import Excel
+          </button>
+          {/* TOMBOL POST ALL DRAFTS */}
+          <button
+            onClick={handlePostAllDrafts}
+            disabled={postingAll}
+            className="flex items-center gap-2 px-4 py-2.5 bg-success/10 text-success border border-success/30 rounded-lg hover:bg-success/20 transition-colors disabled:opacity-50"
+          >
+            <CheckDouble className="w-5 h-5" />
+            Post All Drafts
+          </button>
+          {/* TOMBOL BUAT JURNAL */}
+          <button
+            onClick={() => { resetForm(); setShowAddModal(true); }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30"
+          >
+            <Plus className="w-5 h-5" strokeWidth={2} /> Buat Jurnal
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -378,8 +442,31 @@ export default function JournalEntries() {
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari nomor jurnal atau deskripsi..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
-          <div className="flex gap-2">{['all', 'draft', 'posted'].map((status) => (<button key={status} onClick={() => setFilterStatus(status)} className={`px-4 py-2.5 rounded-lg font-medium transition-colors capitalize ${filterStatus === status ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>{status === 'all' ? 'Semua' : status}</button>))}</div>
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Cari nomor jurnal atau deskripsi..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+            />
+          </div>
+          <div className="flex gap-2">
+            {['all', 'draft', 'posted'].map((status) => (
+              <button
+                key={status}
+                onClick={() => setFilterStatus(status)}
+                className={`px-4 py-2.5 rounded-lg font-medium transition-colors capitalize ${
+                  filterStatus === status
+                    ? 'bg-accent text-white shadow-lg shadow-accent/30'
+                    : 'border border-border hover:bg-background'
+                }`}
+              >
+                {status === 'all' ? 'Semua' : status}
+              </button>
+            ))}
+          </div>
         </div>
       </motion.div>
 
@@ -410,40 +497,62 @@ export default function JournalEntries() {
                       <td className="px-6 py-4 text-sm">{journal.description}</td>
                       <td className="px-6 py-4 text-sm">{journal.project_id ? projects.find(p => p.id === journal.project_id)?.code || '-' : '-'}</td>
                       <td className="px-6 py-4 text-right font-mono font-semibold">{formatCurrency(totalDebit)}</td>
-                      <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{journal.status === 'posted' ? 'Posted' : 'Draft'}</span></td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${
+                          journal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+                        }`}>
+                          {journal.status === 'posted' ? 'Posted' : 'Draft'}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat Detail">
+                          <button
+                            onClick={() => { setSelectedJournal(journal); setShowDetailModal(true); }}
+                            className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"
+                            title="Lihat Detail"
+                          >
                             <Eye className="w-4 h-4" />
                           </button>
                           {journal.status === 'draft' && (
                             <>
-                              <button onClick={() => handleEditJournal(journal)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Edit">
+                              <button
+                                onClick={() => handleEditJournal(journal)}
+                                className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"
+                                title="Edit"
+                              >
                                 <Edit2 className="w-4 h-4" />
                               </button>
-                              <button onClick={() => handlePostJournal(journal)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Post">
+                              <button
+                                onClick={() => handlePostJournal(journal)}
+                                className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"
+                                title="Post"
+                              >
                                 <Send className="w-4 h-4" />
                               </button>
-                              <button onClick={() => handleDeleteJournal(journal.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg" title="Hapus">
+                              <button
+                                onClick={() => handleDeleteJournal(journal.id)}
+                                className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"
+                                title="Hapus"
+                              >
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </>
                           )}
                           {journal.status === 'posted' && (
-                            <button 
+                            <button
                               onClick={() => {
                                 setUnpostTargetId(journal.id);
                                 setShowUnpostModal(true);
-                              }} 
-                              className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg" 
+                              }}
+                              className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"
                               title="Unpost (Kembalikan ke Draft)"
                             >
                               <Undo2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>
-                       </td>
-                     </tr>
+                      </td>
+                    </tr>
                   );
                 })
               )}
@@ -456,41 +565,141 @@ export default function JournalEntries() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
-            <h2 className="font-display text-xl font-bold text-text mb-4">{editingJournal ? 'Edit Jurnal' : 'Buat Jurnal Baru'}</h2>
+            <h2 className="font-display text-xl font-bold text-text mb-4">
+              {editingJournal ? 'Edit Jurnal' : 'Buat Jurnal Baru'}
+            </h2>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-text mb-1">Tanggal</label><input type="date" value={newJournal.journal_date} onChange={(e) => setNewJournal({ ...newJournal, journal_date: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
-                <div><label className="block text-sm font-medium text-text mb-1">Deskripsi</label><input type="text" placeholder="Deskripsi jurnal" value={newJournal.description} onChange={(e) => setNewJournal({ ...newJournal, description: e.target.value })} className="w-full px-4 py-2 border border-border rounded-lg" /></div>
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Tanggal</label>
+                  <input
+                    type="date"
+                    value={newJournal.journal_date}
+                    onChange={(e) => setNewJournal({ ...newJournal, journal_date: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text mb-1">Deskripsi</label>
+                  <input
+                    type="text"
+                    placeholder="Deskripsi jurnal"
+                    value={newJournal.description}
+                    onChange={(e) => setNewJournal({ ...newJournal, description: e.target.value })}
+                    className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-text mb-1">Proyek (Opsional)</label>
-                <select value={newJournal.project_id || ''} onChange={(e) => setNewJournal({ ...newJournal, project_id: e.target.value ? parseInt(e.target.value) : null })} className="w-full px-4 py-2 border border-border rounded-lg">
+                <select
+                  value={newJournal.project_id || ''}
+                  onChange={(e) => setNewJournal({ ...newJournal, project_id: e.target.value ? parseInt(e.target.value) : null })}
+                  className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+                >
                   <option value="">-- Tidak Ada Proyek --</option>
-                  {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                  ))}
                 </select>
               </div>
               <div>
-                <div className="flex justify-between items-center mb-3"><label className="block text-sm font-medium text-text">Detail Jurnal</label><button onClick={addLine} className="text-sm text-accent hover:bg-accent/10 px-3 py-1 rounded-lg">+ Tambah Baris</button></div>
+                <div className="flex justify-between items-center mb-3">
+                  <label className="block text-sm font-medium text-text">Detail Jurnal</label>
+                  <button
+                    onClick={addLine}
+                    className="text-sm text-accent hover:bg-accent/10 px-3 py-1 rounded-lg"
+                  >
+                    + Tambah Baris
+                  </button>
+                </div>
                 <div className="border border-border rounded-lg overflow-hidden">
                   <table className="w-full">
-                    <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted w-32">Kredit</th><th className="px-4 py-2 text-center w-10"></th></tr></thead>
+                    <thead className="bg-background">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th>
+                        <th className="px-4 py-2 text-right text-xs text-text-muted w-32">Debit</th>
+                        <th className="px-4 py-2 text-right text-xs text-text-muted w-32">Kredit</th>
+                        <th className="px-4 py-2 text-center w-10"></th>
+                      </tr>
+                    </thead>
                     <tbody className="divide-y divide-border">
                       {newJournal.lines.map((line, idx) => (
                         <tr key={idx}>
-                          <td className="px-4 py-2"><select value={line.coa_id || ''} onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))} className="w-full px-3 py-1.5 border border-border rounded-lg text-sm"><option value="">Pilih Akun</option>{coaList.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></td>
-                          <td className="px-4 py-2"><input type="number" placeholder="0" value={line.debit || ''} onChange={(e) => updateLine(idx, 'debit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
-                          <td className="px-4 py-2"><input type="number" placeholder="0" value={line.credit || ''} onChange={(e) => updateLine(idx, 'credit', parseInt(e.target.value) || 0)} className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono" /></td>
-                          <td className="px-4 py-2 text-center"><button onClick={() => removeLine(idx)} className="text-danger hover:bg-danger/10 p-1 rounded"><Trash2 className="w-4 h-4" /></button></td>
+                          <td className="px-4 py-2">
+                            <select
+                              value={line.coa_id || ''}
+                              onChange={(e) => updateLine(idx, 'coa_id', parseInt(e.target.value))}
+                              className="w-full px-3 py-1.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                            >
+                              <option value="">Pilih Akun</option>
+                              {coaList.map(acc => (
+                                <option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={line.debit || ''}
+                              onChange={(e) => updateLine(idx, 'debit', parseInt(e.target.value) || 0)}
+                              className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={line.credit || ''}
+                              onChange={(e) => updateLine(idx, 'credit', parseInt(e.target.value) || 0)}
+                              className="w-full px-3 py-1.5 border border-border rounded-lg text-right font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            <button
+                              onClick={() => removeLine(idx)}
+                              className="text-danger hover:bg-danger/10 p-1 rounded"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
-                    <tfoot className="bg-background"><tr className="border-t border-border font-semibold"><td className="px-4 py-2 text-right">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(newJournal.lines.reduce((s, l) => s + l.credit, 0))}</td><td></td></tr></tfoot>
+                    <tfoot className="bg-background">
+                      <tr className="border-t border-border font-semibold">
+                        <td className="px-4 py-2 text-right">TOTAL</td>
+                        <td className="px-4 py-2 text-right text-success">
+                          {formatCurrency(newJournal.lines.reduce((s, l) => s + l.debit, 0))}
+                        </td>
+                        <td className="px-4 py-2 text-right text-danger">
+                          {formatCurrency(newJournal.lines.reduce((s, l) => s + l.credit, 0))}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
-                {newJournal.lines.reduce((s, l) => s + l.debit, 0) !== newJournal.lines.reduce((s, l) => s + l.credit, 0) && <p className="text-danger text-sm mt-2">⚠️ Total Debit harus sama dengan Total Kredit!</p>}
+                {newJournal.lines.reduce((s, l) => s + l.debit, 0) !== newJournal.lines.reduce((s, l) => s + l.credit, 0) && (
+                  <p className="text-danger text-sm mt-2">⚠️ Total Debit harus sama dengan Total Kredit!</p>
+                )}
               </div>
             </div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowAddModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button><button onClick={handleSaveJournal} className="px-4 py-2 bg-accent text-white rounded-lg">{editingJournal ? 'Update Jurnal' : 'Simpan Jurnal'}</button></div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveJournal}
+                className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover"
+              >
+                {editingJournal ? 'Update Jurnal' : 'Simpan Jurnal'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -506,17 +715,27 @@ export default function JournalEntries() {
             </p>
             <div className="mb-4">
               <label className="block text-sm font-medium text-text mb-1">Alasan (Opsional)</label>
-              <textarea 
-                rows={2} 
-                value={unpostReason} 
+              <textarea
+                rows={2}
+                value={unpostReason}
                 onChange={(e) => setUnpostReason(e.target.value)}
                 placeholder="Misal: Kesalahan input, perlu penyesuaian, dll..."
-                className="w-full px-4 py-2 border border-border rounded-lg"
+                className="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowUnpostModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
-              <button onClick={() => handleUnpostJournal(unpostTargetId!, unpostReason)} className="px-4 py-2 bg-warning text-white rounded-lg">Konfirmasi Unpost</button>
+              <button
+                onClick={() => setShowUnpostModal(false)}
+                className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => handleUnpostJournal(unpostTargetId!, unpostReason)}
+                className="px-4 py-2 bg-warning text-white rounded-lg hover:bg-warning/90"
+              >
+                Konfirmasi Unpost
+              </button>
             </div>
           </div>
         </div>
@@ -527,36 +746,99 @@ export default function JournalEntries() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <div><h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2><p className="text-sm text-text-muted">{selectedJournal.description}</p></div>
-              <button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button>
+              <div>
+                <h2 className="font-display text-xl font-bold text-text">{selectedJournal.journal_number}</h2>
+                <p className="text-sm text-text-muted">{selectedJournal.description}</p>
+              </div>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="text-text-muted hover:text-text"
+              >
+                ✕
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <div><p className="text-xs text-text-muted">Tanggal</p><p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p></div>
-              <div><p className="text-xs text-text-muted">Status</p><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>{selectedJournal.status}</span></div>
+              <div>
+                <p className="text-xs text-text-muted">Tanggal</p>
+                <p className="text-sm font-semibold">{formatDate(selectedJournal.journal_date)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">Status</p>
+                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${
+                  selectedJournal.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+                }`}>
+                  {selectedJournal.status}
+                </span>
+              </div>
             </div>
             <div className="border border-border rounded-lg overflow-hidden">
               <table className="w-full">
-                <thead className="bg-background"><tr><th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th><th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th><th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th></tr></thead>
+                <thead className="bg-background">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs text-text-muted">Akun</th>
+                    <th className="px-4 py-2 text-right text-xs text-text-muted">Debit</th>
+                    <th className="px-4 py-2 text-right text-xs text-text-muted">Kredit</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y divide-border">
                   {selectedJournal.lines.map((line, idx) => (
                     <tr key={idx}>
-                      <td className="px-4 py-2"><p className="text-sm font-mono font-semibold">{line.account_code}</p><p className="text-xs text-text-muted">{line.account_name}</p></td>
-                      <td className="px-4 py-2 text-right">{line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}</td>
-                      <td className="px-4 py-2 text-right">{line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}</td>
+                      <td className="px-4 py-2">
+                        <p className="text-sm font-mono font-semibold">{line.account_code}</p>
+                        <p className="text-xs text-text-muted">{line.account_name}</p>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {line.debit > 0 && <span className="text-success">{formatCurrency(line.debit)}</span>}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {line.credit > 0 && <span className="text-danger">{formatCurrency(line.credit)}</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="bg-background font-bold">
-                  <tr><td className="px-4 py-2">TOTAL</td><td className="px-4 py-2 text-right text-success">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}</td><td className="px-4 py-2 text-right text-danger">{formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}</td></tr>
+                  <tr>
+                    <td className="px-4 py-2">TOTAL</td>
+                    <td className="px-4 py-2 text-right text-success">
+                      {formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.debit, 0))}
+                    </td>
+                    <td className="px-4 py-2 text-right text-danger">
+                      {formatCurrency(selectedJournal.lines.reduce((s, l) => s + l.credit, 0))}
+                    </td>
+                  </tr>
                 </tfoot>
               </table>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
-              {selectedJournal.status === 'draft' && <button onClick={() => handlePostJournal(selectedJournal)} className="px-4 py-2 bg-accent text-white rounded-lg">Post Jurnal</button>}
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+              >
+                Tutup
+              </button>
+              {selectedJournal.status === 'draft' && (
+                <button
+                  onClick={() => handlePostJournal(selectedJournal)}
+                  className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover"
+                >
+                  Post Jurnal
+                </button>
+              )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL IMPORT EXCEL */}
+      {showImportModal && (
+        <ImportJournalModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImportSuccess={() => {
+            fetchJournals();
+            setShowImportModal(false);
+          }}
+        />
       )}
     </div>
   );

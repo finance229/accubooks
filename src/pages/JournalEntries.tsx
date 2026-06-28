@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2, Upload, ListChecks } from 'lucide-react';
+import { 
+  Plus, Search, Edit2, Trash2, CheckCircle, XCircle, Eye, Send, Undo2, Upload, ListChecks,
+  ChevronLeft, ChevronRight
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
@@ -26,6 +29,7 @@ type Journal = {
   posted_by: string | null;
   posted_at: string | null;
   lines: JournalLine[];
+  created_at: string;
 };
 
 export default function JournalEntries() {
@@ -49,6 +53,16 @@ export default function JournalEntries() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [postingAll, setPostingAll] = useState(false);
   
+  // 🆕 STATE UNTUK FILTER PERIODE & PAGINATION
+  const [filterMonth, setFilterMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const itemsPerPage = 25;
+  
   const [newJournal, setNewJournal] = useState({
     journal_date: new Date().toISOString().split('T')[0],
     description: '',
@@ -62,31 +76,99 @@ export default function JournalEntries() {
       fetchCoa();
       fetchProjects();
     }
-  }, [currentCompany]);
+  }, [currentCompany, filterMonth, filterStatus, currentPage]);
 
   const fetchJournals = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
-    const { data: journalsData } = await supabase
-      .from('journals')
-      .select('*')
-      .eq('company_id', currentCompany.id)
-      .order('created_at', { ascending: false });
     
-    if (journalsData) {
-      const journalsWithLines = await Promise.all(
-        journalsData.map(async (journal) => {
-          const { data: linesData } = await supabase
-            .from('journal_lines')
-            .select('*')
-            .eq('journal_id', journal.id);
-          return { ...journal, lines: linesData || [] };
-        })
-      );
-      setJournals(journalsWithLines);
+    try {
+      // 🔥 HITUNG TOTAL DULU UNTUK PAGINATION
+      let countQuery = supabase
+        .from('journals')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', currentCompany.id);
+      
+      // Filter bulan/tahun
+      if (filterMonth) {
+        const [year, month] = filterMonth.split('-');
+        const startDate = `${year}-${month}-01`;
+        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+        const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+        countQuery = countQuery.gte('journal_date', startDate).lte('journal_date', endDate);
+      }
+      
+      // Filter status
+      if (filterStatus !== 'all') {
+        countQuery = countQuery.eq('status', filterStatus);
+      }
+      
+      const { count, error: countError } = await countQuery;
+      
+      if (countError) {
+        console.error('Error counting journals:', countError);
+        setLoading(false);
+        return;
+      }
+      
+      setTotalItems(count || 0);
+      setTotalPages(Math.ceil((count || 0) / itemsPerPage));
+      
+      // 🔥 AMBIL DATA DENGAN PAGINATION
+      let query = supabase
+        .from('journals')
+        .select('*')
+        .eq('company_id', currentCompany.id)
+        .order('created_at', { ascending: false })
+        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1);
+      
+      // Filter bulan/tahun
+      if (filterMonth) {
+        const [year, month] = filterMonth.split('-');
+        const startDate = `${year}-${month}-01`;
+        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+        const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+        query = query.gte('journal_date', startDate).lte('journal_date', endDate);
+      }
+      
+      // Filter status
+      if (filterStatus !== 'all') {
+        query = query.eq('status', filterStatus);
+      }
+      
+      const { data: journalsData, error } = await query;
+      
+      if (error) {
+        console.error('Error fetching journals:', error);
+        setLoading(false);
+        return;
+      }
+      
+      if (journalsData) {
+        const journalsWithLines = await Promise.all(
+          journalsData.map(async (journal) => {
+            const { data: linesData } = await supabase
+              .from('journal_lines')
+              .select('*')
+              .eq('journal_id', journal.id);
+            return { ...journal, lines: linesData || [] };
+          })
+        );
+        setJournals(journalsWithLines);
+      } else {
+        setJournals([]);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+  // 🆕 RESET PAGE SAAT FILTER BERUBAH
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMonth, filterStatus]);
 
   const fetchCoa = async () => {
     if (!currentCompany?.id) return;
@@ -377,11 +459,11 @@ export default function JournalEntries() {
     setEditingJournal(null);
   };
 
+  // 🆕 FILTER JOURNALS (SEARCH)
   const filteredJournals = journals.filter(j => {
     const matchesSearch = j.journal_number.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          j.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || j.status === filterStatus;
-    return matchesSearch && matchesFilter;
+    return matchesSearch;
   });
 
   const formatDate = (date: string) => {
@@ -389,10 +471,16 @@ export default function JournalEntries() {
   };
 
   const stats = { 
-    total: journals.length, 
-    draft: journals.filter(j => j.status === 'draft').length, 
-    posted: journals.filter(j => j.status === 'posted').length 
+    total: totalItems,
+    draft: 0,
+    posted: 0,
   };
+
+  // Hitung statistik dari data yang ada
+  journals.forEach(j => {
+    if (j.status === 'draft') stats.draft++;
+    else if (j.status === 'posted') stats.posted++;
+  });
 
   if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
@@ -419,7 +507,7 @@ export default function JournalEntries() {
             className="flex items-center gap-2 px-4 py-2.5 bg-success/10 text-success border border-success/30 rounded-lg hover:bg-success/20 transition-colors disabled:opacity-50"
           >
             <ListChecks className="w-5 h-5" />
-Post All Drafts
+            Post All Drafts
           </button>
           {/* TOMBOL BUAT JURNAL */}
           <button
@@ -432,16 +520,44 @@ Post All Drafts
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        {[{ label: 'Total', value: stats.total }, { label: 'Draft', value: stats.draft }, { label: 'Posted', value: stats.posted }].map((stat, idx) => (
-          <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="bg-surface rounded-xl border border-border p-4">
-            <p className="text-text-muted text-xs font-medium">{stat.label}</p>
-            <p className="text-text text-2xl font-bold font-display mt-1">{stat.value}</p>
-          </motion.div>
-        ))}
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Total</p>
+          <p className="text-text text-2xl font-bold font-display mt-1">{stats.total}</p>
+        </div>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Draft</p>
+          <p className="text-text text-2xl font-bold font-display mt-1">{stats.draft}</p>
+        </div>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-text-muted text-xs font-medium">Posted</p>
+          <p className="text-text text-2xl font-bold font-display mt-1">{stats.posted}</p>
+        </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-surface rounded-xl border border-border p-6">
-        <div className="flex flex-col md:flex-row gap-4">
+      {/* 🆕 FILTER PERIODE */}
+      <div className="bg-surface rounded-xl border border-border p-6">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Periode</label>
+            <input
+              type="month"
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="px-4 py-2.5 border border-border rounded-lg bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Status</label>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-4 py-2.5 border border-border rounded-lg bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              <option value="all">Semua Status</option>
+              <option value="draft">Draft</option>
+              <option value="posted">Posted</option>
+            </select>
+          </div>
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
             <input
@@ -452,25 +568,10 @@ Post All Drafts
               className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
             />
           </div>
-          <div className="flex gap-2">
-            {['all', 'draft', 'posted'].map((status) => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                className={`px-4 py-2.5 rounded-lg font-medium transition-colors capitalize ${
-                  filterStatus === status
-                    ? 'bg-accent text-white shadow-lg shadow-accent/30'
-                    : 'border border-border hover:bg-background'
-                }`}
-              >
-                {status === 'all' ? 'Semua' : status}
-              </button>
-            ))}
-          </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-surface rounded-xl border border-border overflow-hidden">
+      <div className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-background">
@@ -487,6 +588,8 @@ Post All Drafts
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr><td colSpan={7} className="text-center py-8">Loading...</td></tr>
+              ) : filteredJournals.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-8 text-text-muted">Tidak ada jurnal</td></tr>
               ) : (
                 filteredJournals.map((journal) => {
                   const totalDebit = journal.lines.reduce((sum, line) => sum + line.debit, 0);
@@ -559,9 +662,37 @@ Post All Drafts
             </tbody>
           </table>
         </div>
-      </motion.div>
+        
+        {/* 🆕 PAGINATION */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-border">
+            <p className="text-sm text-text-muted">
+              Menampilkan <span className="font-medium text-text">{journals.length}</span> dari <span className="font-medium text-text">{totalItems}</span> jurnal
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-2 rounded-lg border border-border hover:bg-background disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-sm text-text-muted">
+                Halaman {currentPage} dari {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-2 rounded-lg border border-border hover:bg-background disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {/* Modal Add/Edit Jurnal */}
+      {/* Modal Add/Edit Jurnal - SAMA SEPERTI SEBELUMNYA */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
@@ -704,7 +835,7 @@ Post All Drafts
         </div>
       )}
 
-      {/* Modal Unpost */}
+      {/* Modal Unpost - SAMA SEPERTI SEBELUMNYA */}
       {showUnpostModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -741,7 +872,7 @@ Post All Drafts
         </div>
       )}
 
-      {/* Modal Detail */}
+      {/* Modal Detail - SAMA SEPERTI SEBELUMNYA */}
       {showDetailModal && selectedJournal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">

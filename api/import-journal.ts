@@ -3,16 +3,36 @@ import { createGeneralJournal } from '../src/lib/accountingHelpers';
 import { parseExcelFile } from '../src/lib/excelParser';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   try {
+    console.log('📥 Import API hit:', req.body);
+
     const { action } = req.body;
+
+    if (!action) {
+      return res.status(400).json({ error: 'Action is required' });
+    }
 
     if (action === 'preview') {
       const { fileBase64, companyId } = req.body;
+
       if (!fileBase64 || !companyId) {
-        return res.status(400).json({ error: 'fileBase64 dan companyId wajib' });
+        return res.status(400).json({ 
+          error: 'fileBase64 dan companyId wajib',
+          received: { fileBase64: !!fileBase64, companyId }
+        });
       }
 
       const buffer = Buffer.from(fileBase64, 'base64');
@@ -26,15 +46,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'import') {
       const { groups, companyId } = req.body;
+
       if (!groups || !companyId) {
         return res.status(400).json({ error: 'groups dan companyId wajib' });
       }
 
-      const results: { success: boolean; journalId?: number; error?: string; group: any }[] = [];
+      const results = [];
+      let successCount = 0;
+      let failCount = 0;
 
       for (const group of groups) {
         if (!group.valid) {
           results.push({ success: false, error: group.error || 'Group tidak valid', group });
+          failCount++;
           continue;
         }
 
@@ -62,16 +86,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           if (journalId) {
             results.push({ success: true, journalId, group });
+            successCount++;
           } else {
             results.push({ success: false, error: 'Gagal membuat jurnal', group });
+            failCount++;
           }
         } catch (err: any) {
           results.push({ success: false, error: err.message || 'Error', group });
+          failCount++;
         }
       }
-
-      const successCount = results.filter(r => r.success).length;
-      const failCount = results.filter(r => !r.success).length;
 
       return res.status(200).json({
         success: true,
@@ -80,9 +104,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    return res.status(400).json({ error: 'Action tidak dikenal' });
+    return res.status(400).json({ error: `Action "${action}" tidak dikenal` });
   } catch (error: any) {
-    console.error('Import error:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    console.error('❌ Import error:', error);
+    return res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }

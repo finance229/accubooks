@@ -3,38 +3,39 @@ import { createGeneralJournal } from '../src/lib/accountingHelpers';
 import { parseExcelFile } from '../src/lib/excelParser';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
+  console.log('📥 import-journal API called');
+  console.log('Method:', req.method);
+  
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  // Handle OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
+  // Hanya terima POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    console.log('📥 Import API hit:', req.body);
-
     const { action } = req.body;
+    console.log('Action:', action);
 
-    if (!action) {
-      return res.status(400).json({ error: 'Action is required' });
-    }
-
+    // === PREVIEW ===
     if (action === 'preview') {
       const { fileBase64, companyId } = req.body;
 
       if (!fileBase64 || !companyId) {
         return res.status(400).json({ 
-          error: 'fileBase64 dan companyId wajib',
-          received: { fileBase64: !!fileBase64, companyId }
+          error: 'fileBase64 dan companyId wajib' 
         });
       }
 
+      // Parse Excel
       const buffer = Buffer.from(fileBase64, 'base64');
       const file = new File([buffer], 'upload.xlsx', {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -44,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, preview });
     }
 
+    // === IMPORT ===
     if (action === 'import') {
       const { groups, companyId } = req.body;
 
@@ -51,13 +53,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'groups dan companyId wajib' });
       }
 
-      const results = [];
+      const results: any[] = [];
       let successCount = 0;
       let failCount = 0;
 
       for (const group of groups) {
         if (!group.valid) {
-          results.push({ success: false, error: group.error || 'Group tidak valid', group });
+          results.push({ success: false, error: group.error || 'Group tidak valid' });
           failCount++;
           continue;
         }
@@ -85,14 +87,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
 
           if (journalId) {
-            results.push({ success: true, journalId, group });
+            results.push({ success: true, journalId });
             successCount++;
           } else {
-            results.push({ success: false, error: 'Gagal membuat jurnal', group });
+            results.push({ success: false, error: 'Gagal membuat jurnal' });
             failCount++;
           }
         } catch (err: any) {
-          results.push({ success: false, error: err.message || 'Error', group });
+          results.push({ success: false, error: err.message || 'Error' });
           failCount++;
         }
       }
@@ -105,8 +107,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.status(400).json({ error: `Action "${action}" tidak dikenal` });
+
   } catch (error: any) {
-    console.error('❌ Import error:', error);
+    console.error('❌ API Error:', error);
     return res.status(500).json({ 
       error: error.message || 'Internal server error',
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined

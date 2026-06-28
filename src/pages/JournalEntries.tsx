@@ -71,7 +71,7 @@ export default function JournalEntries() {
       .from('journals')
       .select('*')
       .eq('company_id', currentCompany.id)
-      .order('journal_date', { ascending: false });
+      .order('created_at', { ascending: false });
     
     if (journalsData) {
       const journalsWithLines = await Promise.all(

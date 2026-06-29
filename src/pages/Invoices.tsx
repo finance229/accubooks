@@ -1,4 +1,4 @@
-=import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';

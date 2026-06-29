@@ -46,61 +46,98 @@ export default function BalanceSheet() {
     setLoading(true);
 
     try {
-      // Ambil data dari view balance_sheet
-      const { data: viewData, error } = await supabase
-        .from('balance_sheet')
-        .select('*')
+      // 🔥 AMBIL SEMUA JURNAL SAMPAI TANGGAL TERTENTU
+      const { data: journals, error: jError } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('company_id', currentCompany.id)
+        .eq('status', 'posted')
+        .lte('journal_date', asOfDate);
+
+      if (jError) {
+        console.error('Error fetching journals:', jError);
+        setLoading(false);
+        return;
+      }
+
+      if (!journals || journals.length === 0) {
+        setData({ assets: [], liabilities: [], equity: [], totalAssets: 0, totalLiabilities: 0, totalEquity: 0 });
+        setLoading(false);
+        return;
+      }
+
+      const journalIds = journals.map(j => j.id);
+
+      // Ambil journal lines
+      const { data: lines, error: lError } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, coa_id')
+        .in('journal_id', journalIds);
+
+      if (lError || !lines) {
+        console.error('Error fetching journal lines:', lError);
+        setLoading(false);
+        return;
+      }
+
+      // Ambil COA
+      const { data: coaList } = await supabase
+        .from('coa')
+        .select('id, code, name, type')
         .eq('company_id', currentCompany.id);
 
-      if (error) {
-        console.error('Error fetching balance sheet:', error);
-        setLoading(false);
-        return;
-      }
+      const coaMap = new Map();
+      coaList?.forEach(c => coaMap.set(c.id, c));
 
-      console.log('Balance sheet data:', viewData);
+      // Hitung saldo per akun (debit - credit)
+      const balanceMap = new Map<number, number>();
 
-      if (!viewData || viewData.length === 0) {
-        setLoading(false);
-        return;
-      }
+      lines.forEach((line: any) => {
+        const coa = coaMap.get(line.coa_id);
+        if (!coa) return;
 
-      // Filter aset (asset)
-      const assetsList = viewData
-        .filter(item => item.account_type === 'asset' && item.balance !== 0)
-        .map(item => ({
-          id: item.coa_id,
-          account_code: item.account_code,
-          account_name: item.account_name,
-          balance: item.balance,
-          type: item.account_type,
-        }));
+        const amount = (line.debit || 0) - (line.credit || 0);
+        const current = balanceMap.get(coa.id) || 0;
+        balanceMap.set(coa.id, current + amount);
+      });
 
-      // Filter kewajiban (liability)
-      const liabilitiesList = viewData
-        .filter(item => item.account_type === 'liability' && item.balance !== 0)
-        .map(item => ({
-          id: item.coa_id,
-          account_code: item.account_code,
-          account_name: item.account_name,
-          balance: item.balance,
-          type: item.account_type,
-        }));
+      // Kategorikan berdasarkan type
+      const assetsList: AccountBalance[] = [];
+      const liabilitiesList: AccountBalance[] = [];
+      const equityList: AccountBalance[] = [];
+      let totalAssets = 0;
+      let totalLiabilities = 0;
+      let totalEquity = 0;
 
-      // Filter ekuitas (equity)
-      const equityList = viewData
-        .filter(item => item.account_type === 'equity' && item.balance !== 0)
-        .map(item => ({
-          id: item.coa_id,
-          account_code: item.account_code,
-          account_name: item.account_name,
-          balance: item.balance,
-          type: item.account_type,
-        }));
+      balanceMap.forEach((balance, coaId) => {
+        if (balance === 0) return;
+        const coa = coaList?.find(c => c.id === coaId);
+        if (!coa) return;
 
-      const totalAssets = assetsList.reduce((sum, a) => sum + a.balance, 0);
-      const totalLiabilities = liabilitiesList.reduce((sum, l) => sum + l.balance, 0);
-      const totalEquity = equityList.reduce((sum, e) => sum + e.balance, 0);
+        const item: AccountBalance = {
+          id: coa.id,
+          account_code: coa.code,
+          account_name: coa.name,
+          balance: balance,
+          type: coa.type,
+        };
+
+        if (coa.type === 'asset') {
+          assetsList.push(item);
+          totalAssets += balance;
+        } else if (coa.type === 'liability') {
+          liabilitiesList.push(item);
+          totalLiabilities += balance;
+        } else if (coa.type === 'equity') {
+          equityList.push(item);
+          totalEquity += balance;
+        }
+      });
+
+      // Sort
+      assetsList.sort((a, b) => a.account_code.localeCompare(b.account_code));
+      liabilitiesList.sort((a, b) => a.account_code.localeCompare(b.account_code));
+      equityList.sort((a, b) => a.account_code.localeCompare(b.account_code));
 
       setData({
         assets: assetsList,

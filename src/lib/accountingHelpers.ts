@@ -6,6 +6,7 @@ export const formatCurrency = (amount: number) => {
     currency: 'IDR',
     minimumFractionDigits: 0,
   }).format(Math.abs(amount));
+  return amount < 0 ? `-${formatted}` : formatted;
 };
 
 export const formatNumber = (amount: number) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, CheckCircle, XCircle, Clock, AlertCircle, UserCheck, Award, Upload, X, FolderOpen, Coins, Banknote } from 'lucide-react';
+import { Plus, Search, Eye, Send, CheckCircle, XCircle, Clock, AlertCircle, UserCheck, Award, Upload, X, FolderOpen, Coins, Banknote, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +48,7 @@ type Project = { id: number; code: string; name: string; budget: number; spent: 
 type Coa = { id: number; code: string; name: string; type: string };
 
 export default function PaymentRequests() {
+  const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
@@ -680,8 +682,7 @@ export default function PaymentRequests() {
         </div>
       )}
 
-      {/* Modal Detail */}
-      {showDetailModal && selectedRequest && (
+         {showDetailModal && selectedRequest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
             <div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Request</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div>
@@ -695,10 +696,25 @@ export default function PaymentRequests() {
               {selectedRequest.voucher_no && <p><strong>Voucher:</strong> {selectedRequest.voucher_no}</p>}
               {selectedRequest.attachment_url && <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>}
             </div>
+            {/* 🔥 DOKUMEN TERKAIT */}
+            {selectedRequest && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
+                <button
+                  onClick={() => navigate(`/documents?ref=payment_request&id=${selectedRequest.id}`)}
+                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <FileText className="w-4 h-4" />
+                  Lihat dokumen untuk Payment Request ini
+                </button>
+              </div>
+            )}
+            <div className="flex justify-end mt-6">
+              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
+            </div>
           </div>
         </div>
       )}
-
       {/* Modal Buat Proyek Baru */}
       {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

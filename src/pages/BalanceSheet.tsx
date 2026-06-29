@@ -393,8 +393,8 @@ export default function BalanceSheet() {
                       <div key={idx} className="flex justify-between py-1">
                         <span className="text-text">{item.account_name}</span>
                         <span className={item.balance < 0 ? 'text-danger' : ''}>
-                          {formatCurrency(item.balance)}
-                        </span>
+  {item.balance < 0 ? '- ' : ''}{formatCurrency(item.balance)}
+</span>
                       </div>
                     ))
                   )}

@@ -411,9 +411,9 @@ export default function Ledger() {
                         <td className="px-6 py-3 whitespace-nowrap text-right text-sm font-mono text-danger">
                           {item.credit > 0 ? formatCurrency(item.credit) : '-'}
                         </td>
-                        <td className="px-6 py-3 whitespace-nowrap text-right text-sm font-mono font-bold text-info">
-                          {formatCurrency(item.balance)}
-                        </td>
+                       <td className={`... ${item.balance < 0 ? 'text-danger' : 'text-info'}`}>
+  {item.balance < 0 ? '- ' : ''}{formatCurrency(item.balance)}
+</td>
                       </motion.tr>
                     ))
                   )}

@@ -1,27 +1,21 @@
 import { supabase } from './supabase';
 
 // ============================================
-// ✅ FORMAT CURRENCY - SUPPORT MINUS
+// ✅ FORMAT CURRENCY - TANPA MINUS OTOMATIS
 // ============================================
 export const formatCurrency = (amount: number) => {
-  // 🔥 CEK APAKAH NEGATIF
-  const isNegative = amount < 0;
-  const absAmount = Math.abs(amount);
-  
-  const formatted = new Intl.NumberFormat('id-ID', {
+  return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
-  }).format(absAmount);
-  
-  // 🔥 TAMBAHKAN TANDA MINUS JIKA NEGATIF
-  return isNegative ? `-${formatted}` : formatted;
+  }).format(Math.abs(amount));
 };
 
 export const formatNumber = (amount: number) => {
   return new Intl.NumberFormat('id-ID').format(amount);
 };
 
+// ... sisanya sama seperti sebelumnya
 export const getCompanySuffix = (_companyId: number): string => {
   const suffixMap: Record<number, string> = {
     1: 'A',

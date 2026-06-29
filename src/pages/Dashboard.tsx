@@ -165,7 +165,6 @@ export default function Dashboard() {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
     
-    // Ambil semua journal yang sudah diposting
     const { data: journals, error: jError } = await supabase
       .from('journals')
       .select('id, journal_date')
@@ -177,7 +176,6 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // Filter tanggal di JavaScript
     const filteredJournals = journals.filter(j => {
       const date = new Date(j.journal_date);
       return date >= new Date(startDate) && date <= new Date(endDate);
@@ -189,7 +187,6 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // Ambil journal lines
     const { data: lines, error: lError } = await supabase
       .from('journal_lines')
       .select('debit, credit, coa_id')
@@ -200,7 +197,6 @@ export default function Dashboard() {
       return getEmptySummary();
     }
     
-    // Ambil semua COA
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, code, name, type')
@@ -209,7 +205,6 @@ export default function Dashboard() {
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    // Hitung
     let totalPendapatan = 0;
     let totalPengeluaran = 0;
     let totalPiutang = 0;
@@ -222,22 +217,29 @@ export default function Dashboard() {
       
       const debit = line.debit || 0;
       const credit = line.credit || 0;
-      const selisih = debit - credit;
       
+      // 🔥 Revenue: Credit - Debit
       if (coa.type === 'revenue') {
         totalPendapatan += (credit - debit);
-      } else if (coa.type === 'expense') {
+      } 
+      // 🔥 Expense: Debit - Credit
+      else if (coa.type === 'expense') {
         totalPengeluaran += (debit - credit);
-      } else if (coa.code === '1111') {
-        totalPiutang += selisih;
-      } else if (coa.code === '2101') {
+      } 
+      // 🔥 Piutang (1111) - Aset
+      else if (coa.code === '1111') {
+        totalPiutang += (debit - credit);
+      } 
+      // 🔥 Hutang (2101) - Liabilitas
+      else if (coa.code === '2101') {
         totalHutang += (credit - debit);
-      } else if (coa.code.startsWith('1101') || coa.code.startsWith('1102')) {
-        totalKas += selisih;
+      } 
+      // 🔥 Kas/Bank (1101, 1102) - Aset
+      else if (coa.code.startsWith('1101') || coa.code.startsWith('1102')) {
+        totalKas += (debit - credit);
       }
     });
     
-    // Invoice count
     const { count: invoiceCount } = await supabase
       .from('invoices')
       .select('*', { count: 'exact', head: true })
@@ -245,17 +247,19 @@ export default function Dashboard() {
       .gte('invoice_date', startDate)
       .lte('invoice_date', endDate);
     
-    // Pending PR
     const { count: pendingCount } = await supabase
       .from('payment_requests')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .in('status', ['submitted', 'verified']);
     
+    // 🔥 HITUNG LABA BERSIH
+    const labaBersih = totalPendapatan - totalPengeluaran;
+    
     return {
       totalPendapatan: totalPendapatan,
       totalPengeluaran: totalPengeluaran,
-      labaBersih: totalPendapatan - totalPengeluaran,
+      labaBersih: labaBersih,
       totalPiutang: totalPiutang > 0 ? totalPiutang : 0,
       totalHutang: totalHutang > 0 ? totalHutang : 0,
       totalKas: totalKas > 0 ? totalKas : 0,
@@ -288,7 +292,7 @@ export default function Dashboard() {
   });
 
   // ============================================
-  // 2. TREND DARI JURNAL (6 BULAN) - PERBAIKAN
+  // 2. TREND DARI JURNAL (6 BULAN)
   // ============================================
   const fetchTrendFromJournal = async (companyId: number, year: number, month: number) => {
     const months = [];
@@ -296,7 +300,6 @@ export default function Dashboard() {
     const pengeluaran = [];
     const laba = [];
     
-    // Ambil semua journal + lines sekali
     const { data: allJournals } = await supabase
       .from('journals')
       .select('id, journal_date')
@@ -314,7 +317,6 @@ export default function Dashboard() {
       allLines = lines || [];
     }
     
-    // Ambil COA
     const { data: coaList } = await supabase
       .from('coa')
       .select('id, type')
@@ -323,7 +325,6 @@ export default function Dashboard() {
     const coaMap = new Map();
     coaList?.forEach(c => coaMap.set(c.id, c));
     
-    // Buat map journal_date per id
     const journalDateMap = new Map();
     allJournals?.forEach(j => journalDateMap.set(j.id, j.journal_date));
     
@@ -340,7 +341,6 @@ export default function Dashboard() {
       const start = `${y}-${String(m).padStart(2, '0')}-01`;
       const end = `${y}-${String(m).padStart(2, '0')}-31`;
       
-      // Filter lines berdasarkan tanggal journal
       let p = 0, q = 0;
       allLines.forEach((line: any) => {
         const journalDate = journalDateMap.get(line.journal_id);
@@ -351,9 +351,13 @@ export default function Dashboard() {
         if (!coa) return;
         const debit = line.debit || 0;
         const credit = line.credit || 0;
+        
+        // 🔥 Revenue: Credit - Debit
         if (coa.type === 'revenue') {
           p += (credit - debit);
-        } else if (coa.type === 'expense') {
+        } 
+        // 🔥 Expense: Debit - Credit
+        else if (coa.type === 'expense') {
           q += (debit - credit);
         }
       });
@@ -501,7 +505,7 @@ export default function Dashboard() {
   };
 
   // ============================================
-  // RENDER HELPERS (sama seperti sebelumnya)
+  // RENDER HELPERS
   // ============================================
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {
@@ -751,7 +755,14 @@ export default function Dashboard() {
             {summary && [
               { label: 'Pendapatan', value: summary.totalPendapatan, change: summary.perubahan.pendapatan, icon: TrendingUp, color: 'green' },
               { label: 'Pengeluaran', value: summary.totalPengeluaran, change: summary.perubahan.pengeluaran, icon: TrendingDown, color: 'red' },
-              { label: 'Laba Bersih', value: summary.labaBersih, change: summary.perubahan.laba, icon: DollarSign, color: 'blue' },
+              // 🔥 LABA BERSIH - FIX
+              { 
+                label: 'Laba Bersih', 
+                value: summary.labaBersih, 
+                change: summary.perubahan.laba, 
+                icon: DollarSign, 
+                color: summary.labaBersih >= 0 ? 'blue' : 'red' 
+              },
               { label: 'Piutang', value: summary.totalPiutang, change: 0, icon: Receipt, color: 'yellow' },
               { label: 'Hutang', value: summary.totalHutang, change: 0, icon: FileText, color: 'orange' },
               { label: 'Saldo Kas', value: summary.totalKas, change: 0, icon: Building2, color: 'teal' },
@@ -768,10 +779,13 @@ export default function Dashboard() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <p className="text-text-muted text-xs font-medium truncate">{stat.label}</p>
-                    <p className="text-text text-lg font-bold font-display mt-1 truncate">
+                    {/* 🔥 LABA BERSIH - TAMPILKAN MINUS JIKA NEGATIF */}
+                    <p className={`text-text text-lg font-bold font-display mt-1 truncate ${
+                      stat.label === 'Laba Bersih' && stat.value < 0 ? 'text-danger' : ''
+                    }`}>
                       {stat.label === 'Total Invoice' || stat.label === 'Pending PR' 
                         ? stat.value 
-                        : formatCurrency(stat.value)}
+                        : stat.value < 0 ? `- ${formatCurrency(Math.abs(stat.value))}` : formatCurrency(stat.value)}
                     </p>
                     {stat.change !== 0 && (
                       <div className="flex items-center gap-1 mt-1">

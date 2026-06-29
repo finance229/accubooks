@@ -370,8 +370,8 @@ export default function IncomeStatement() {
               <div className="flex justify-between font-bold text-xl">
                 <span>LABA BERSIH</span>
                 <span className={data.netIncome >= 0 ? 'text-success' : 'text-danger'}>
-                  {formatCurrency(data.netIncome)}
-                </span>
+  {data.netIncome < 0 ? '- ' : ''}{formatCurrency(data.netIncome)}
+</span>
               </div>
             </div>
           </>

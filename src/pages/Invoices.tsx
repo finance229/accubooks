@@ -16,6 +16,7 @@ import {
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
 import { generateKwitansiHTML } from '../lib/kwitansiTemplate';
 import AgingModal from '../components/AgingModal';
+import { getTemplateFields, getTemplateOptions, getTemplateLabel } from '../components/InvoiceFormFields';
 
 type Invoice = {
   id: number;
@@ -32,6 +33,11 @@ type Invoice = {
   notes: string;
   paid_amount: number;
   last_payment_date: string;
+  template: string;
+  include_ppn: boolean;
+  include_pph: boolean;
+  ppn_amount: number;
+  pph_amount: number;
 };
 
 type InvoiceItem = {
@@ -41,6 +47,7 @@ type InvoiceItem = {
   unit_price: number;
   discount: number;
   amount: number;
+  meta?: any;
 };
 
 type Customer = {
@@ -86,6 +93,11 @@ export default function Invoices() {
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
+  // ============ STATE UNTUK TEMPLATE & PPN/PPH ============
+  const [selectedTemplate, setSelectedTemplate] = useState('general');
+  const [includePpn, setIncludePpn] = useState(false);
+  const [includePph, setIncludePph] = useState(false);
+  
   const [formData, setFormData] = useState({
     customer_id: 0,
     customer_name: '',
@@ -93,7 +105,7 @@ export default function Invoices() {
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     project_id: null as number | null,
     notes: '',
-    items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0 }] as InvoiceItem[],
+    items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: {} }] as InvoiceItem[],
   });
   
   const [customerSearch, setCustomerSearch] = useState('');
@@ -166,9 +178,12 @@ export default function Invoices() {
   };
 
   const addItem = () => {
+    const fields = getTemplateFields(selectedTemplate);
+    const newMeta: any = {};
+    fields.forEach(f => { newMeta[f.key] = ''; });
     setFormData({
       ...formData,
-      items: [...formData.items, { description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0 }]
+      items: [...formData.items, { description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: newMeta }]
     });
   };
 
@@ -182,11 +197,12 @@ export default function Invoices() {
   const calculateTotals = () => {
     const subtotal = formData.items.reduce((sum, item) => sum + item.amount, 0);
     const ppnRate = currentCompany?.id === 1 ? 0.11 : 0.011;
-    const ppn = Math.round(subtotal * ppnRate);
-    return { subtotal, ppn, total: subtotal + ppn };
+    const ppn = includePpn ? Math.round(subtotal * ppnRate) : 0;
+    const pph = includePph ? Math.round(subtotal * 0.02) : 0;
+    return { subtotal, ppn, pph, total: subtotal + ppn - pph };
   };
 
-  const { subtotal, ppn, total } = calculateTotals();
+  const { subtotal, ppn, pph, total } = calculateTotals();
 
   const handleCreateCustomer = async () => {
     if (!newCustomer.name) {
@@ -240,14 +256,25 @@ export default function Invoices() {
       return;
     }
     if (!currentCompany?.id) return;
-const projectCode = formData.project_id 
-  ? projects.find(p => p.id === formData.project_id)?.code || null
-  : null;
-const invoiceNumber = await generateInvoiceNo(
-  currentCompany.id,
-  new Date(formData.invoice_date),
-  projectCode
-);
+    
+    const projectCode = formData.project_id 
+      ? projects.find(p => p.id === formData.project_id)?.code || null
+      : null;
+    const invoiceNumber = await generateInvoiceNo(
+      currentCompany.id,
+      new Date(formData.invoice_date),
+      projectCode
+    );
+
+    // Siapkan items dengan meta
+    const itemsToInsert = formData.items.map(item => ({
+      description: item.description || '',
+      quantity: item.quantity || 1,
+      unit_price: item.unit_price || 0,
+      discount: item.discount || 0,
+      amount: item.amount || 0,
+      meta: item.meta || {},
+    }));
 
     const { data: invoiceData, error: invoiceError } = await supabase
       .from('invoices')
@@ -266,6 +293,11 @@ const invoiceNumber = await generateInvoiceNo(
         notes: formData.notes,
         created_by: user?.email,
         paid_amount: 0,
+        template: selectedTemplate,
+        include_ppn: includePpn,
+        include_pph: includePph,
+        ppn_amount: includePpn ? ppn : 0,
+        pph_amount: includePph ? pph : 0,
       }])
       .select();
 
@@ -276,7 +308,7 @@ const invoiceNumber = await generateInvoiceNo(
 
     const invoiceId = invoiceData[0].id;
 
-    for (const item of formData.items) {
+    for (const item of itemsToInsert) {
       await supabase.from('invoice_items').insert([{
         invoice_id: invoiceId,
         description: item.description,
@@ -284,6 +316,7 @@ const invoiceNumber = await generateInvoiceNo(
         unit_price: item.unit_price,
         discount: item.discount,
         amount: item.amount,
+        meta: item.meta,
       }]);
     }
 
@@ -301,61 +334,64 @@ const invoiceNumber = await generateInvoiceNo(
       due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       project_id: null,
       notes: '',
-      items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0 }],
+      items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: {} }],
     });
     setCustomerSearch('');
+    setSelectedTemplate('general');
+    setIncludePpn(false);
+    setIncludePph(false);
   };
 
   const handleVerifyInvoice = async (invoice: Invoice) => {
-  try {
-    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
-    const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
-    const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
-    
-    if (!receivableAcc || !revenueAcc) {
-      alert('Akun tidak ditemukan. Cek COA untuk company ' + currentCompany?.name);
-      return;
+    try {
+      const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+      const revenueAcc = await getDefaultAccount(currentCompany!.id, 'revenue');
+      const ppnOutAcc = await getDefaultAccount(currentCompany!.id, 'ppn_out');
+      
+      if (!receivableAcc || !revenueAcc) {
+        alert('Akun tidak ditemukan. Cek COA untuk company ' + currentCompany?.name);
+        return;
+      }
+
+      const entries = [
+        { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },
+        { account_id: revenueAcc.id, account_code: revenueAcc.code, account_name: revenueAcc.name, debit: 0, credit: invoice.subtotal },
+      ];
+      
+      if (invoice.ppn > 0 && ppnOutAcc) {
+        entries.push({ account_id: ppnOutAcc.id, account_code: ppnOutAcc.code, account_name: ppnOutAcc.name, debit: 0, credit: invoice.ppn });
+      }
+
+      const journalId = await createGeneralJournal(
+        currentCompany!.id,
+        invoice.invoice_date,
+        'Penjualan invoice ' + invoice.invoice_number + ' - ' + invoice.customer_name,
+        invoice.invoice_number,
+        'INVOICE',
+        invoice.id,
+        entries,
+        invoice.project_id || undefined
+      );
+
+      if (!journalId) {
+        alert('Gagal membuat jurnal');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('invoices')
+        .update({ status: 'verified' })
+        .eq('id', invoice.id);
+
+      if (error) throw error;
+
+      alert('Invoice berhasil diverifikasi');
+      fetchInvoices();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Gagal verifikasi');
     }
-
-    const entries = [
-      { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: invoice.total, credit: 0 },
-      { account_id: revenueAcc.id, account_code: revenueAcc.code, account_name: revenueAcc.name, debit: 0, credit: invoice.subtotal },
-    ];
-    
-    if (invoice.ppn > 0 && ppnOutAcc) {
-      entries.push({ account_id: ppnOutAcc.id, account_code: ppnOutAcc.code, account_name: ppnOutAcc.name, debit: 0, credit: invoice.ppn });
-    }
-
-    const journalId = await createGeneralJournal(
-      currentCompany!.id,
-      invoice.invoice_date,
-      'Penjualan invoice ' + invoice.invoice_number + ' - ' + invoice.customer_name,
-      invoice.invoice_number,
-      'INVOICE',
-      invoice.id,
-      entries,
-      invoice.project_id || undefined
-    );
-
-    if (!journalId) {
-      alert('Gagal membuat jurnal');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('invoices')
-      .update({ status: 'verified' })
-      .eq('id', invoice.id);
-
-    if (error) throw error;
-
-    alert('Invoice berhasil diverifikasi');
-    fetchInvoices();
-  } catch (error) {
-    console.error('Error:', error);
-    alert('Gagal verifikasi');
-  }
-};
+  };
 
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
@@ -469,9 +505,6 @@ const invoiceNumber = await generateInvoiceNo(
     }
   };
 
-  // ============================================
-  // CETAK KWITANSI
-  // ============================================
   const handlePrintKwitansi = async (invoice: Invoice) => {
     try {
       const { data: items } = await supabase
@@ -625,6 +658,9 @@ const invoiceNumber = await generateInvoiceNo(
     pending: invoices.filter(i => i.status === 'sent' || i.status === 'partial' || i.status === 'verified').length,
   };
 
+  const fields = getTemplateFields(selectedTemplate);
+  const ppnLabel = currentCompany?.id === 1 ? 'PPN 11%' : 'PPN 1.1%';
+
   if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
   return (
@@ -698,7 +734,6 @@ const invoiceNumber = await generateInvoiceNo(
                         {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
                         <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
                         <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><Send className="w-4 h-4" /></button>
-                        {/* 🆕 TOMBOL KWITANSI - muncul saat status verified, partial, atau paid */}
                         {(invoice.status === 'verified' || invoice.status === 'partial' || invoice.status === 'paid') && (
                           <button
                             onClick={() => handlePrintKwitansi(invoice)}
@@ -722,15 +757,244 @@ const invoiceNumber = await generateInvoiceNo(
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
-            <div className="flex justify-between items-center mb-4"><h2 className="font-display text-xl font-bold">Buat Invoice Baru</h2><button onClick={() => { setShowModal(false); resetForm(); }}><X className="w-5 h-5" /></button></div>
-            <div className="space-y-4">
-              <div className="relative"><label className="block text-sm font-medium mb-1">Customer *</label><div className="flex gap-2"><div className="flex-1 relative"><input type="text" placeholder="Cari customer..." value={customerSearch} onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }} className="w-full px-4 py-2 border rounded-lg" />{showCustomerDropdown && filteredCustomers.length > 0 && (<div className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-48 overflow-auto">{filteredCustomers.map(c => (<button key={c.id} className="w-full text-left px-4 py-2 hover:bg-gray-100" onClick={() => { setFormData({ ...formData, customer_id: c.id, customer_name: c.name }); setCustomerSearch(c.name); setShowCustomerDropdown(false); }}>{c.name}</button>))}</div>)}</div><button onClick={() => setShowNewCustomerModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button></div></div>
-              <div className="grid grid-cols-2 gap-4"><div><label>Tanggal Invoice</label><input type="date" value={formData.invoice_date} onChange={e => setFormData({...formData, invoice_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div><div><label>Jatuh Tempo</label><input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div></div>
-              <div><label>Proyek (Opsional)</label><div className="flex gap-2"><select value={formData.project_id || ''} onChange={e => setFormData({...formData, project_id: e.target.value ? parseInt(e.target.value) : null})} className="flex-1 px-4 py-2 border rounded-lg"><option value="">-- Tidak Ada Proyek --</option>{projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}</select><button onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button></div></div>
-              <div><label className="block text-sm font-medium mb-1">Item</label><button onClick={addItem} className="text-sm text-accent mb-2">+ Tambah Item</button><div className="border rounded-lg overflow-hidden"><table className="w-full"><thead className="bg-gray-50"><tr><th className="px-2 py-2 text-left text-xs">Deskripsi</th><th className="px-2 py-2 text-center w-20">Qty</th><th className="px-2 py-2 text-right w-32">Harga</th><th className="px-2 py-2 text-right w-32">Diskon</th><th className="px-2 py-2 text-right w-32">Jumlah</th><th className="w-10"></th></tr></thead><tbody>{formData.items.map((item, idx) => (<tr key={idx}><td className="px-2 py-2"><input type="text" placeholder="Deskripsi" value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} className="w-full px-2 py-1 border rounded text-sm" /></td><td className="px-2 py-2"><input type="number" value={item.quantity} onChange={e => updateItem(idx, 'quantity', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border rounded text-right" /></td><td className="px-2 py-2"><input type="number" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border rounded text-right" /></td><td className="px-2 py-2"><input type="number" value={item.discount} onChange={e => updateItem(idx, 'discount', parseInt(e.target.value) || 0)} className="w-full px-2 py-1 border rounded text-right" /></td><td className="px-2 py-2 text-right text-sm font-mono">{formatCurrency(item.amount)}</td><td className="px-2 py-2 text-center"><button onClick={() => removeItem(idx)}><Trash2 className="w-4 h-4 text-danger" /></button></td></tr>))}</tbody><tfoot className="bg-gray-50"><tr><td colSpan={4} className="px-2 py-2 text-right font-medium">Subtotal</td><td className="px-2 py-2 text-right font-mono">{formatCurrency(subtotal)}</td><td></td></tr><tr><td colSpan={4} className="px-2 py-2 text-right font-medium">PPN {currentCompany?.id === 1 ? '11%' : '1.1%'}</td><td className="px-2 py-2 text-right font-mono">{formatCurrency(ppn)}</td><td></td></tr><tr className="font-bold"><td colSpan={4} className="px-2 py-2 text-right">TOTAL</td><td className="px-2 py-2 text-right text-accent">{formatCurrency(total)}</td><td></td></tr></tfoot></table></div></div>
-              <div><label>Catatan</label><textarea rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold">Buat Invoice Baru</h2>
+              <button onClick={() => { setShowModal(false); resetForm(); }}><X className="w-5 h-5" /></button>
             </div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button></div>
+            <div className="space-y-4">
+              {/* Customer */}
+              <div className="relative">
+                <label className="block text-sm font-medium mb-1">Customer *</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      placeholder="Cari customer..."
+                      value={customerSearch}
+                      onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
+                      className="w-full px-4 py-2 border rounded-lg"
+                    />
+                    {showCustomerDropdown && filteredCustomers.length > 0 && (
+                      <div className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-48 overflow-auto">
+                        {filteredCustomers.map(c => (
+                          <button
+                            key={c.id}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-100"
+                            onClick={() => {
+                              setFormData({ ...formData, customer_id: c.id, customer_name: c.name });
+                              setCustomerSearch(c.name);
+                              setShowCustomerDropdown(false);
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setShowNewCustomerModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button>
+                </div>
+              </div>
+
+              {/* Template & PPN/PPh */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Template Invoice</label>
+                  <select
+                    value={selectedTemplate}
+                    onChange={(e) => {
+                      const newTemplate = e.target.value;
+                      if (newTemplate !== selectedTemplate) {
+                        if (confirm('Ganti template akan mereset item yang sudah diisi. Lanjutkan?')) {
+                          setSelectedTemplate(newTemplate);
+                          const fields = getTemplateFields(newTemplate);
+                          const newMeta: any = {};
+                          fields.forEach(f => { newMeta[f.key] = ''; });
+                          setFormData({
+                            ...formData,
+                            items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: newMeta }]
+                          });
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 border rounded-lg"
+                  >
+                    {getTemplateOptions().map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={includePpn}
+                      onChange={e => {
+                        setIncludePpn(e.target.checked);
+                        // Reset items agar subtotal dihitung ulang
+                      }}
+                    />
+                    + {ppnLabel}
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={includePph}
+                      onChange={e => setIncludePph(e.target.checked)}
+                    />
+                    - PPh 23 (2%)
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div><label>Tanggal Invoice</label><input type="date" value={formData.invoice_date} onChange={e => setFormData({...formData, invoice_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
+                <div><label>Jatuh Tempo</label><input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div>
+              </div>
+
+              <div>
+                <label>Proyek (Opsional)</label>
+                <div className="flex gap-2">
+                  <select value={formData.project_id || ''} onChange={e => setFormData({...formData, project_id: e.target.value ? parseInt(e.target.value) : null})} className="flex-1 px-4 py-2 border rounded-lg">
+                    <option value="">-- Tidak Ada Proyek --</option>
+                    {projects.map(p => (<option key={p.id} value={p.id}>{p.code} - {p.name}</option>))}
+                  </select>
+                  <button onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button>
+                </div>
+              </div>
+
+              {/* Item Table */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Item</label>
+                <button onClick={addItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {fields.map(field => (
+                          <th key={field.key} className="px-2 py-2 text-left text-xs">
+                            {field.label}
+                          </th>
+                        ))}
+                        <th className="px-2 py-2 text-right text-xs">Jumlah</th>
+                        <th className="w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formData.items.map((item, idx) => (
+                        <tr key={idx}>
+                          {fields.map(field => {
+                            const value = item.meta?.[field.key] || '';
+                            return (
+                              <td key={field.key} className="px-2 py-2">
+                                {field.type === 'date' ? (
+                                  <input
+                                    type="date"
+                                    value={value}
+                                    onChange={(e) => {
+                                      const newItems = [...formData.items];
+                                      newItems[idx] = {
+                                        ...newItems[idx],
+                                        meta: { ...newItems[idx].meta, [field.key]: e.target.value }
+                                      };
+                                      setFormData({ ...formData, items: newItems });
+                                    }}
+                                    className="w-full px-2 py-1 border rounded text-sm"
+                                  />
+                                ) : field.type === 'number' ? (
+                                  <input
+                                    type="number"
+                                    placeholder={field.placeholder}
+                                    value={value}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      const newItems = [...formData.items];
+                                      newItems[idx] = {
+                                        ...newItems[idx],
+                                        meta: { ...newItems[idx].meta, [field.key]: val },
+                                        description: newItems[idx].description || '',
+                                        quantity: newItems[idx].quantity || 1,
+                                        unit_price: newItems[idx].unit_price || 0,
+                                        discount: newItems[idx].discount || 0,
+                                      };
+                                      // Hitung amount
+                                      const qty = newItems[idx].quantity || 1;
+                                      const price = newItems[idx].unit_price || 0;
+                                      const disc = newItems[idx].discount || 0;
+                                      newItems[idx].amount = (qty * price) - disc;
+                                      setFormData({ ...formData, items: newItems });
+                                    }}
+                                    className="w-full px-2 py-1 border rounded text-sm text-right"
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    placeholder={field.placeholder}
+                                    value={value}
+                                    onChange={(e) => {
+                                      const newItems = [...formData.items];
+                                      newItems[idx] = {
+                                        ...newItems[idx],
+                                        meta: { ...newItems[idx].meta, [field.key]: e.target.value }
+                                      };
+                                      setFormData({ ...formData, items: newItems });
+                                    }}
+                                    className="w-full px-2 py-1 border rounded text-sm"
+                                  />
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-2 py-2 text-right text-sm font-mono">
+                            {formatCurrency(item.amount || 0)}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <button onClick={() => removeItem(idx)} className="text-danger">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-50">
+                      <tr>
+                        <td colSpan={fields.length} className="px-2 py-2 text-right font-medium">Subtotal</td>
+                        <td className="px-2 py-2 text-right font-mono">{formatCurrency(subtotal)}</td>
+                        <td></td>
+                      </tr>
+                      {includePpn && (
+                        <tr>
+                          <td colSpan={fields.length} className="px-2 py-2 text-right font-medium">{ppnLabel}</td>
+                          <td className="px-2 py-2 text-right font-mono">{formatCurrency(ppn)}</td>
+                          <td></td>
+                        </tr>
+                      )}
+                      {includePph && (
+                        <tr>
+                          <td colSpan={fields.length} className="px-2 py-2 text-right font-medium">PPh 23 (2%)</td>
+                          <td className="px-2 py-2 text-right font-mono text-danger">({formatCurrency(pph)})</td>
+                          <td></td>
+                        </tr>
+                      )}
+                      <tr className="font-bold">
+                        <td colSpan={fields.length} className="px-2 py-2 text-right">TOTAL</td>
+                        <td className="px-2 py-2 text-right text-accent">{formatCurrency(total)}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <label>Catatan</label>
+                <textarea rows={2} value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
+            </div>
           </div>
         </div>
       )}
@@ -739,28 +1003,95 @@ const invoiceNumber = await generateInvoiceNo(
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
-            <h2 className="font-display text-xl font-bold mb-4">Pembayaran Invoice</h2><button onClick={() => setShowPaymentModal(false)} className="float-right">✕</button>
-            <div className="space-y-4 mt-4"><div><p className="text-sm text-text-muted">No. Invoice</p><p className="font-semibold">{selectedInvoice.invoice_number}</p></div>
-            <div><p className="text-sm text-text-muted">Total</p><p className="font-semibold">{formatCurrency(selectedInvoice.total)}</p></div>
-            <div><p className="text-sm text-text-muted">Sudah Dibayar</p><p className="font-semibold text-success">{formatCurrency(selectedInvoice.paid_amount || 0)}</p></div>
-            <div><p className="text-sm text-text-muted">Sisa</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
-            <div><label className="block text-sm font-medium mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-            <div><label className="block text-sm font-medium mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-            <div><label className="block text-sm font-medium mb-1">Metode</label><select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border rounded-lg"><option value="transfer">Transfer</option><option value="cash">Tunai</option><option value="credit_card">Kartu Kredit</option></select></div>
-            <div><label className="block text-sm font-medium mb-1">Akun Bank / Kas</label><select value={selectedBankId} onChange={e => setSelectedBankId(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg"><option value={0}>-- Pilih Akun --</option>{bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}</select></div>
-            <div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleRecordPayment} className="px-4 py-2 bg-accent text-white rounded-lg">Catat</button></div></div>
+            <h2 className="font-display text-xl font-bold mb-4">Pembayaran Invoice</h2>
+            <button onClick={() => setShowPaymentModal(false)} className="float-right">✕</button>
+            <div className="space-y-4 mt-4">
+              <div><p className="text-sm text-text-muted">No. Invoice</p><p className="font-semibold">{selectedInvoice.invoice_number}</p></div>
+              <div><p className="text-sm text-text-muted">Total</p><p className="font-semibold">{formatCurrency(selectedInvoice.total)}</p></div>
+              <div><p className="text-sm text-text-muted">Sudah Dibayar</p><p className="font-semibold text-success">{formatCurrency(selectedInvoice.paid_amount || 0)}</p></div>
+              <div><p className="text-sm text-text-muted">Sisa</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
+              <div><label className="block text-sm font-medium mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium mb-1">Metode</label><select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border rounded-lg"><option value="transfer">Transfer</option><option value="cash">Tunai</option><option value="credit_card">Kartu Kredit</option></select></div>
+              <div><label className="block text-sm font-medium mb-1">Akun Bank / Kas</label>
+                <select value={selectedBankId} onChange={e => setSelectedBankId(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg">
+                  <option value={0}>-- Pilih Akun --</option>
+                  {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+                <button onClick={handleRecordPayment} className="px-4 py-2 bg-accent text-white rounded-lg">Catat</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Modal Customer Baru */}
-      {showNewCustomerModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Tambah Customer</h2><div className="space-y-3"><input type="text" placeholder="Nama *" value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="email" placeholder="Email" value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Telepon" value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><textarea placeholder="Alamat" rows={2} value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowNewCustomerModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateCustomer} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button></div></div></div>)}
+      {showNewCustomerModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold mb-4">Tambah Customer</h2>
+            <div className="space-y-3">
+              <input type="text" placeholder="Nama *" value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="email" placeholder="Email" value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Telepon" value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <textarea placeholder="Alamat" rows={2} value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowNewCustomerModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleCreateCustomer} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Proyek Baru */}
-      {showNewProjectModal && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-md"><h2 className="font-display text-xl font-bold mb-4">Tambah Proyek</h2><div className="space-y-3"><input type="text" placeholder="Kode *" value={newProject.code} onChange={e => setNewProject({...newProject, code: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" /><input type="text" placeholder="Nama *" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" /><input type="number" placeholder="Anggaran" value={newProject.budget || ''} onChange={e => setNewProject({...newProject, budget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" /></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setShowNewProjectModal(false)} className="px-4 py-2 border rounded-lg">Batal</button><button onClick={handleCreateProject} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button></div></div></div>)}
+      {showNewProjectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold mb-4">Tambah Proyek</h2>
+            <div className="space-y-3">
+              <input type="text" placeholder="Kode *" value={newProject.code} onChange={e => setNewProject({...newProject, code: e.target.value.toUpperCase()})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Nama *" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="number" placeholder="Anggaran" value={newProject.budget || ''} onChange={e => setNewProject({...newProject, budget: parseInt(e.target.value) || 0})} className="w-full px-4 py-2 border rounded-lg" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowNewProjectModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleCreateProject} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Detail */}
-      {showDetailModal && selectedInvoice && (<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"><div className="bg-surface rounded-xl p-6 w-full max-w-lg"><div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Invoice</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div><div className="space-y-2 mt-4"><p><strong>No:</strong> {selectedInvoice.invoice_number}</p><p><strong>Customer:</strong> {selectedInvoice.customer_name}</p><p><strong>Tanggal:</strong> {selectedInvoice.invoice_date}</p><p><strong>Jatuh Tempo:</strong> {selectedInvoice.due_date}</p><p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p><p><strong>Sudah Dibayar:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}</p><p><strong>Sisa:</strong> {formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p><p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p></div><div className="flex justify-end mt-6"><button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button></div></div></div>)}
+      {showDetailModal && selectedInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
+            <div className="flex justify-between">
+              <h2 className="font-display text-xl font-bold">Detail Invoice</h2>
+              <button onClick={() => setShowDetailModal(false)}>✕</button>
+            </div>
+            <div className="space-y-2 mt-4">
+              <p><strong>No:</strong> {selectedInvoice.invoice_number}</p>
+              <p><strong>Customer:</strong> {selectedInvoice.customer_name}</p>
+              <p><strong>Tanggal:</strong> {selectedInvoice.invoice_date}</p>
+              <p><strong>Jatuh Tempo:</strong> {selectedInvoice.due_date}</p>
+              <p><strong>Total:</strong> {formatCurrency(selectedInvoice.total)}</p>
+              <p><strong>Sudah Dibayar:</strong> {formatCurrency(selectedInvoice.paid_amount || 0)}</p>
+              <p><strong>Sisa:</strong> {formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p>
+              <p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p>
+              <p><strong>Template:</strong> {getTemplateLabel(selectedInvoice.template || 'general')}</p>
+              {selectedInvoice.include_ppn && <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn_amount || 0)}</p>}
+              {selectedInvoice.include_pph && <p><strong>PPh 23:</strong> {formatCurrency(selectedInvoice.pph_amount || 0)}</p>}
+            </div>
+            <div className="flex justify-end mt-6">
+              <button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Aging Modal */}
       {showAgingModal && (

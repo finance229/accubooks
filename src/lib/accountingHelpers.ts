@@ -1,12 +1,21 @@
 import { supabase } from './supabase';
 
+// ============================================
+// ✅ FORMAT CURRENCY - SUPPORT MINUS
+// ============================================
 export const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('id-ID', {
+  // 🔥 CEK APAKAH NEGATIF
+  const isNegative = amount < 0;
+  const absAmount = Math.abs(amount);
+  
+  const formatted = new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
-  }).format(Math.abs(amount));
-  return amount < 0 ? `-${formatted}` : formatted;
+  }).format(absAmount);
+  
+  // 🔥 TAMBAHKAN TANDA MINUS JIKA NEGATIF
+  return isNegative ? `-${formatted}` : formatted;
 };
 
 export const formatNumber = (amount: number) => {

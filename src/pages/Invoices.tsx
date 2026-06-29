@@ -97,7 +97,11 @@ export default function Invoices() {
   // ============ STATE UNTUK TEMPLATE & PPN ============
   const [selectedTemplate, setSelectedTemplate] = useState('general');
   const [includePpn, setIncludePpn] = useState(false);
-  const [includePph, setIncludePph] = useState(false); // Untuk pembayaran
+  const [includePph, setIncludePph] = useState(false);
+  
+  // ============ STATE EDIT ============
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -171,25 +175,68 @@ export default function Invoices() {
     setBankAccounts(banks);
   };
 
+  // ============ LOAD INVOICE FOR EDIT ============
+  const loadInvoiceForEdit = async (invoiceId: number) => {
+    if (!currentCompany?.id) return;
+    try {
+      const { data: invoice, error: invError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', invoiceId)
+        .single();
+      if (invError) throw invError;
+      if (!invoice) return;
+
+      const { data: items, error: itemsError } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoiceId);
+      if (itemsError) throw itemsError;
+
+      setFormData({
+        customer_id: invoice.customer_id,
+        customer_name: invoice.customer_name || '',
+        invoice_date: invoice.invoice_date,
+        due_date: invoice.due_date,
+        project_id: invoice.project_id,
+        notes: invoice.notes || '',
+        items: items && items.length > 0 ? items.map((item: any) => ({
+          description: item.description || '',
+          quantity: item.quantity || 1,
+          unit_price: item.unit_price || 0,
+          discount: item.discount || 0,
+          amount: item.amount || 0,
+          meta: item.meta || {},
+        })) : [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: {} }],
+      });
+
+      setCustomerSearch(invoice.customer_name || '');
+      setSelectedTemplate(invoice.template || 'general');
+      setIncludePpn(invoice.include_ppn || false);
+      setIsEditMode(true);
+      setEditingInvoiceId(invoiceId);
+      setShowModal(true);
+    } catch (error) {
+      console.error('Error loading invoice for edit:', error);
+      alert('Gagal memuat data invoice');
+    }
+  };
+
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
-  // 🔥 UPDATE ITEM META DAN HITUNG AMOUNT OTOMATIS - FIX GENERAL
   const updateItemMeta = (index: number, fieldKey: string, value: any) => {
     const newItems = [...formData.items];
     const item = newItems[index];
     if (!item.meta) item.meta = {};
     item.meta[fieldKey] = value;
 
-    // 🔥 HITUNG AMOUNT BERDASARKAN TEMPLATE
     if (selectedTemplate === 'general') {
-      // Ambil nilai dari meta (karena input general pakai meta)
       const qty = parseFloat(item.meta.quantity) || 1;
       const price = parseFloat(item.meta.unit_price) || 0;
       const disc = parseFloat(item.meta.discount) || 0;
       item.amount = (qty * price) - disc;
-      // Update item agar database tersimpan dengan benar
       item.quantity = qty;
       item.unit_price = price;
       item.discount = disc;
@@ -211,21 +258,6 @@ export default function Invoices() {
       item.unit_price = item.amount;
     }
 
-    setFormData({ ...formData, items: newItems });
-  };
-
-  // 🔥 UPDATE ITEM UNTUK GENERAL (DESKRIPSI, QTY, DLL) - alternatif jika pakai updateItem
-  const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
-    const newItems = [...formData.items];
-    newItems[index] = { ...newItems[index], [field]: value };
-    
-    if (field === 'quantity' || field === 'unit_price' || field === 'discount') {
-      const qty = newItems[index].quantity;
-      const price = newItems[index].unit_price;
-      const disc = newItems[index].discount;
-      newItems[index].amount = (qty * price) - disc;
-    }
-    
     setFormData({ ...formData, items: newItems });
   };
 
@@ -301,23 +333,14 @@ export default function Invoices() {
     }
   };
 
-  const handleCreateInvoice = async () => {
+  // ============ SAVE INVOICE (CREATE OR UPDATE) ============
+  const handleSaveInvoice = async () => {
     if (!formData.customer_id || formData.items.length === 0) {
       alert('Lengkapi customer dan minimal 1 item');
       return;
     }
     if (!currentCompany?.id) return;
-    
-    const projectCode = formData.project_id 
-      ? projects.find(p => p.id === formData.project_id)?.code || null
-      : null;
-    const invoiceNumber = await generateInvoiceNo(
-      currentCompany.id,
-      new Date(formData.invoice_date),
-      projectCode
-    );
 
-    // Siapkan items dengan meta
     const itemsToInsert = formData.items.map(item => ({
       description: item.description || '',
       quantity: item.quantity || 1,
@@ -327,51 +350,111 @@ export default function Invoices() {
       meta: item.meta || {},
     }));
 
-    const { data: invoiceData, error: invoiceError } = await supabase
-      .from('invoices')
-      .insert([{
-        company_id: currentCompany.id,
-        invoice_number: invoiceNumber,
-        invoice_date: formData.invoice_date,
-        due_date: formData.due_date,
-        customer_id: formData.customer_id,
-        customer_name: formData.customer_name,
-        project_id: formData.project_id,
-        subtotal: subtotal,
-        ppn: ppn,
-        total: total,
-        status: 'draft',
-        notes: formData.notes,
-        created_by: user?.email,
-        paid_amount: 0,
-        template: selectedTemplate,
-        include_ppn: includePpn,
-        include_pph: false,
-        ppn_amount: includePpn ? ppn : 0,
-        pph_amount: 0,
-      }])
-      .select();
+    if (isEditMode && editingInvoiceId) {
+      // ========== UPDATE INVOICE ==========
+      const { error: updateError } = await supabase
+        .from('invoices')
+        .update({
+          invoice_date: formData.invoice_date,
+          due_date: formData.due_date,
+          customer_id: formData.customer_id,
+          customer_name: formData.customer_name,
+          project_id: formData.project_id,
+          subtotal: subtotal,
+          ppn: ppn,
+          total: total,
+          notes: formData.notes,
+          template: selectedTemplate,
+          include_ppn: includePpn,
+          ppn_amount: includePpn ? ppn : 0,
+        })
+        .eq('id', editingInvoiceId);
 
-    if (invoiceError) {
-      alert('Gagal membuat invoice: ' + invoiceError.message);
-      return;
+      if (updateError) {
+        alert('Gagal update invoice: ' + updateError.message);
+        return;
+      }
+
+      // Delete old items
+      await supabase
+        .from('invoice_items')
+        .delete()
+        .eq('invoice_id', editingInvoiceId);
+
+      // Insert new items
+      for (const item of itemsToInsert) {
+        await supabase.from('invoice_items').insert([{
+          invoice_id: editingInvoiceId,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount: item.discount,
+          amount: item.amount,
+          meta: item.meta,
+        }]);
+      }
+
+      alert('Invoice berhasil diupdate');
+      setIsEditMode(false);
+      setEditingInvoiceId(null);
+    } else {
+      // ========== CREATE NEW INVOICE ==========
+      const projectCode = formData.project_id 
+        ? projects.find(p => p.id === formData.project_id)?.code || null
+        : null;
+      const invoiceNumber = await generateInvoiceNo(
+        currentCompany.id,
+        new Date(formData.invoice_date),
+        projectCode
+      );
+
+      const { data: invoiceData, error: invoiceError } = await supabase
+        .from('invoices')
+        .insert([{
+          company_id: currentCompany.id,
+          invoice_number: invoiceNumber,
+          invoice_date: formData.invoice_date,
+          due_date: formData.due_date,
+          customer_id: formData.customer_id,
+          customer_name: formData.customer_name,
+          project_id: formData.project_id,
+          subtotal: subtotal,
+          ppn: ppn,
+          total: total,
+          status: 'draft',
+          notes: formData.notes,
+          created_by: user?.email,
+          paid_amount: 0,
+          template: selectedTemplate,
+          include_ppn: includePpn,
+          include_pph: false,
+          ppn_amount: includePpn ? ppn : 0,
+          pph_amount: 0,
+        }])
+        .select();
+
+      if (invoiceError) {
+        alert('Gagal membuat invoice: ' + invoiceError.message);
+        return;
+      }
+
+      const invoiceId = invoiceData[0].id;
+
+      for (const item of itemsToInsert) {
+        await supabase.from('invoice_items').insert([{
+          invoice_id: invoiceId,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount: item.discount,
+          amount: item.amount,
+          meta: item.meta,
+        }]);
+      }
+
+      alert('Invoice berhasil dibuat');
     }
 
-    const invoiceId = invoiceData[0].id;
-
-    for (const item of itemsToInsert) {
-      await supabase.from('invoice_items').insert([{
-        invoice_id: invoiceId,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        discount: item.discount,
-        amount: item.amount,
-        meta: item.meta,
-      }]);
-    }
-
-    alert('Invoice berhasil dibuat');
     setShowModal(false);
     resetForm();
     fetchInvoices();
@@ -391,6 +474,8 @@ export default function Invoices() {
     setSelectedTemplate('general');
     setIncludePpn(false);
     setIncludePph(false);
+    setIsEditMode(false);
+    setEditingInvoiceId(null);
   };
 
   const handleVerifyInvoice = async (invoice: Invoice) => {
@@ -453,6 +538,7 @@ export default function Invoices() {
     setShowPaymentModal(true);
   };
 
+  // ============ RECORD PAYMENT (FIX PPh 23) ============
   const handleRecordPayment = async () => {
     if (!selectedInvoice) return;
     
@@ -467,7 +553,7 @@ export default function Invoices() {
     }
     
     const currentPaid = selectedInvoice.paid_amount || 0;
-    const newPaid = currentPaid + amount;
+    const newPaid = currentPaid + amount; // amount = full payment sebelum potongan
     const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
     
     const bankAccount = bankAccounts.find(b => b.id === selectedBankId);
@@ -478,28 +564,62 @@ export default function Invoices() {
       return;
     }
     
-    // 🔥 ENTRIES JURNAL DENGAN PPH 23
-    const entries: any[] = [
-      { account_id: bankAccount.id, account_code: bankAccount.code, account_name: bankAccount.name, debit: amount, credit: 0 },
-      { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: 0, credit: amount },
-    ];
+    // 🔥 ENTRIES JURNAL
+    const entries: any[] = [];
 
-    // 🔥 TAMBAHKAN PPH 23 JIKA DIPILIH
-    let pphAmount = 0;
     if (includePph) {
-      pphAmount = Math.round(amount * 0.02);
+      // 🔥 ADA PPH 23
+      const pphAmount = Math.round(amount * 0.02); // 2%
+      const bankAmount = amount - pphAmount;
+      
+      // Debit Bank (jumlah yang diterima setelah potongan)
+      entries.push({
+        account_id: bankAccount.id,
+        account_code: bankAccount.code,
+        account_name: bankAccount.name,
+        debit: bankAmount,
+        credit: 0,
+      });
+      
+      // Debit PPh 23 Masukan (sebagai aset/potongan)
       const pphAcc = await getDefaultAccount(currentCompany!.id, 'pph23');
       if (pphAcc) {
         entries.push({
           account_id: pphAcc.id,
           account_code: pphAcc.code,
           account_name: pphAcc.name,
-          debit: 0,
-          credit: pphAmount,
+          debit: pphAmount,
+          credit: 0,
         });
-        // Kurangi debit bank
-        entries[0].debit = amount - pphAmount;
+      } else {
+        alert('Akun PPh 23 tidak ditemukan di COA');
+        return;
       }
+      
+      // Kredit Piutang (full amount)
+      entries.push({
+        account_id: receivableAcc.id,
+        account_code: receivableAcc.code,
+        account_name: receivableAcc.name,
+        debit: 0,
+        credit: amount,
+      });
+    } else {
+      // 🔥 TANPA PPH 23
+      entries.push({
+        account_id: bankAccount.id,
+        account_code: bankAccount.code,
+        account_name: bankAccount.name,
+        debit: amount,
+        credit: 0,
+      });
+      entries.push({
+        account_id: receivableAcc.id,
+        account_code: receivableAcc.code,
+        account_name: receivableAcc.name,
+        debit: 0,
+        credit: amount,
+      });
     }
     
     const journalId = await createGeneralJournal(
@@ -532,6 +652,8 @@ export default function Invoices() {
       return;
     }
     
+    // Simpan ke invoice_payments
+    const pphAmount = includePph ? Math.round(amount * 0.02) : 0;
     await supabase.from('invoice_payments').insert([{
       invoice_id: selectedInvoice.id,
       payment_date: paymentDate,
@@ -639,13 +761,13 @@ export default function Invoices() {
     }
   };
 
-  // 🔥 EDIT INVOICE (HANYA UNTUK DRAFT)
+  // ============ EDIT INVOICE ============
   const handleEditInvoice = (invoice: Invoice) => {
     if (invoice.status !== 'draft') {
       alert('Hanya invoice status draft yang bisa diedit');
       return;
     }
-    alert(`Edit invoice ${invoice.invoice_number} - fitur akan menyusul`);
+    loadInvoiceForEdit(invoice.id);
   };
 
   // ========== AGING REPORT ==========
@@ -755,7 +877,10 @@ export default function Invoices() {
           >
             📊 Aging Report
           </button>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30">
+          <button 
+            onClick={() => { resetForm(); setShowModal(true); }} 
+            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30"
+          >
             <Plus className="w-5 h-5" /> Buat Invoice
           </button>
         </div>
@@ -833,12 +958,12 @@ export default function Invoices() {
         </div>
       </div>
 
-      {/* Modal Buat Invoice */}
+      {/* Modal Buat/Edit Invoice */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="font-display text-xl font-bold">Buat Invoice Baru</h2>
+              <h2 className="font-display text-xl font-bold">{isEditMode ? 'Edit Invoice' : 'Buat Invoice Baru'}</h2>
               <button onClick={() => { setShowModal(false); resetForm(); }}><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-4">
@@ -876,7 +1001,7 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {/* 🔥 TEMPLATE HANYA UNTUK MMC */}
+              {/* Template & PPN */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Template Invoice</label>
@@ -1027,8 +1152,10 @@ export default function Invoices() {
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
-              <button onClick={handleCreateInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
+              <button onClick={() => { setShowModal(false); resetForm(); }} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleSaveInvoice} className="px-4 py-2 bg-accent text-white rounded-lg">
+                {isEditMode ? 'Update Invoice' : 'Simpan'}
+              </button>
             </div>
           </div>
         </div>

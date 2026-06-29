@@ -61,7 +61,7 @@ function terbilang(angka: number) {
 }
 
 // ============================================================
-// BASE HTML GENERATOR
+// BASE HTML GENERATOR (DENGAN TTD YANG BENAR)
 // ============================================================
 function generateBaseHTML(
   invoice: any,
@@ -204,6 +204,7 @@ function generateBaseHTML(
         </div>
       </div>
       
+      <!-- 🔥 TTD DIPERBAIKI 🔥 -->
       <div class="signature">
         ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') && company?.signature_url ? 
           `<img src="${company.signature_url}" class="signature-img" />` : 

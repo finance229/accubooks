@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+=import { useState, useEffect } from 'react';
 import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -11,7 +11,8 @@ import {
   createCustomerIfNotExist,
   createProjectIfNotExist,
   getBankAccounts,
-  generateInvoiceNo
+  generateInvoiceNo,
+  getCompanySuffix
 } from '../lib/accountingHelpers';
 import { generateInvoiceHTML } from '../lib/invoiceTemplate';
 import { generateKwitansiHTML } from '../lib/kwitansiTemplate';
@@ -111,6 +112,17 @@ export default function Invoices() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
+  // 🔥 CEK SUFFIX PERUSAHAAN
+  const suffix = currentCompany ? getCompanySuffix(currentCompany.id) : 'A';
+  const isMMC = suffix === 'B';
+
+  // 🔥 FORCE GENERAL UNTUK NON-MMC
+  useEffect(() => {
+    if (!isMMC && selectedTemplate !== 'general') {
+      setSelectedTemplate('general');
+    }
+  }, [isMMC]);
+
   useEffect(() => {
     if (currentCompany?.id) {
       fetchInvoices();
@@ -163,6 +175,41 @@ export default function Invoices() {
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
+  // 🔥 UPDATE ITEM META DAN HITUNG AMOUNT OTOMATIS
+  const updateItemMeta = (index: number, fieldKey: string, value: any) => {
+    const newItems = [...formData.items];
+    const item = newItems[index];
+    if (!item.meta) item.meta = {};
+    item.meta[fieldKey] = value;
+
+    // 🔥 HITUNG AMOUNT BERDASARKAN TEMPLATE
+    if (selectedTemplate === 'general') {
+      const qty = item.quantity || 1;
+      const price = item.unit_price || 0;
+      const disc = item.discount || 0;
+      item.amount = (qty * price) - disc;
+    } else if (selectedTemplate === 'a') {
+      const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
+      const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
+      item.amount = hargaRitase + hargaMultiDrop;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    } else if (selectedTemplate === 'b') {
+      const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
+      item.amount = hargaRitase;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    } else if (selectedTemplate === 'c') {
+      const harga = parseFloat(item.meta.harga) || 0;
+      item.amount = harga;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    }
+
+    setFormData({ ...formData, items: newItems });
+  };
+
+  // 🔥 UPDATE ITEM UNTUK GENERAL (DESKRIPSI, QTY, DLL)
   const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
@@ -195,10 +242,9 @@ export default function Invoices() {
   };
 
   const calculateTotals = () => {
-    const subtotal = formData.items.reduce((sum, item) => sum + item.amount, 0);
+    const subtotal = formData.items.reduce((sum, item) => sum + (item.amount || 0), 0);
     const ppnRate = currentCompany?.id === 1 ? 0.11 : 0.011;
     const ppn = includePpn ? Math.round(subtotal * ppnRate) : 0;
-    // PPh 23 TIDAK di invoice, hanya di pembayaran
     return { subtotal, ppn, total: subtotal + ppn };
   };
 
@@ -295,7 +341,7 @@ export default function Invoices() {
         paid_amount: 0,
         template: selectedTemplate,
         include_ppn: includePpn,
-        include_pph: false, // PPh 23 di pembayaran
+        include_pph: false,
         ppn_amount: includePpn ? ppn : 0,
         pph_amount: 0,
       }])
@@ -588,8 +634,14 @@ export default function Invoices() {
     }
   };
 
+  // 🔥 EDIT INVOICE (HANYA UNTUK DRAFT)
   const handleEditInvoice = (invoice: Invoice) => {
-    alert(`Edit invoice ${invoice.invoice_number} (fitur menyusul)`);
+    if (invoice.status !== 'draft') {
+      alert('Hanya invoice status draft yang bisa diedit');
+      return;
+    }
+    // Di sini nanti bisa diimplementasikan untuk buka modal edit
+    alert(`Edit invoice ${invoice.invoice_number} - fitur akan menyusul`);
   };
 
   // ========== AGING REPORT ==========
@@ -751,7 +803,9 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
-                        {invoice.status === 'draft' && <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>}
+                        {invoice.status === 'draft' && (
+                          <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>
+                        )}
                         {(invoice.status === 'draft' || invoice.status === 'sent') && <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><CheckCircle className="w-4 h-4" /></button>}
                         {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
                         <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
@@ -818,33 +872,37 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {/* Template & PPN */}
+              {/* 🔥 TEMPLATE HANYA UNTUK MMC */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Template Invoice</label>
-                  <select
-                    value={selectedTemplate}
-                    onChange={(e) => {
-                      const newTemplate = e.target.value;
-                      if (newTemplate !== selectedTemplate) {
-                        if (confirm('Ganti template akan mereset item yang sudah diisi. Lanjutkan?')) {
-                          setSelectedTemplate(newTemplate);
-                          const fields = getTemplateFields(newTemplate);
-                          const newMeta: any = {};
-                          fields.forEach(f => { newMeta[f.key] = ''; });
-                          setFormData({
-                            ...formData,
-                            items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: newMeta }]
-                          });
+                  {isMMC ? (
+                    <select
+                      value={selectedTemplate}
+                      onChange={(e) => {
+                        const newTemplate = e.target.value;
+                        if (newTemplate !== selectedTemplate) {
+                          if (confirm('Ganti template akan mereset item yang sudah diisi. Lanjutkan?')) {
+                            setSelectedTemplate(newTemplate);
+                            const fields = getTemplateFields(newTemplate);
+                            const newMeta: any = {};
+                            fields.forEach(f => { newMeta[f.key] = ''; });
+                            setFormData({
+                              ...formData,
+                              items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: newMeta }]
+                            });
+                          }
                         }
-                      }
-                    }}
-                    className="w-full px-4 py-2 border rounded-lg"
-                  >
-                    {getTemplateOptions().map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                      }}
+                      className="w-full px-4 py-2 border rounded-lg"
+                    >
+                      {getTemplateOptions().map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input type="text" value="General" disabled className="w-full px-4 py-2 border rounded-lg bg-gray-100" />
+                  )}
                 </div>
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-2">
@@ -855,7 +913,6 @@ export default function Invoices() {
                     />
                     + {ppnLabel}
                   </label>
-                  {/* PPh 23 dihapus dari sini, pindah ke pembayaran */}
                 </div>
               </div>
 
@@ -903,14 +960,7 @@ export default function Invoices() {
                                   <input
                                     type="date"
                                     value={value}
-                                    onChange={(e) => {
-                                      const newItems = [...formData.items];
-                                      newItems[idx] = {
-                                        ...newItems[idx],
-                                        meta: { ...newItems[idx].meta, [field.key]: e.target.value }
-                                      };
-                                      setFormData({ ...formData, items: newItems });
-                                    }}
+                                    onChange={(e) => updateItemMeta(idx, field.key, e.target.value)}
                                     className="w-full px-2 py-1 border rounded text-sm"
                                   />
                                 ) : field.type === 'number' ? (
@@ -918,23 +968,7 @@ export default function Invoices() {
                                     type="number"
                                     placeholder={field.placeholder}
                                     value={value}
-                                    onChange={(e) => {
-                                      const val = parseFloat(e.target.value) || 0;
-                                      const newItems = [...formData.items];
-                                      newItems[idx] = {
-                                        ...newItems[idx],
-                                        meta: { ...newItems[idx].meta, [field.key]: val },
-                                        description: newItems[idx].description || '',
-                                        quantity: newItems[idx].quantity || 1,
-                                        unit_price: newItems[idx].unit_price || 0,
-                                        discount: newItems[idx].discount || 0,
-                                      };
-                                      const qty = newItems[idx].quantity || 1;
-                                      const price = newItems[idx].unit_price || 0;
-                                      const disc = newItems[idx].discount || 0;
-                                      newItems[idx].amount = (qty * price) - disc;
-                                      setFormData({ ...formData, items: newItems });
-                                    }}
+                                    onChange={(e) => updateItemMeta(idx, field.key, parseFloat(e.target.value) || 0)}
                                     className="w-full px-2 py-1 border rounded text-sm text-right"
                                   />
                                 ) : (
@@ -942,14 +976,7 @@ export default function Invoices() {
                                     type="text"
                                     placeholder={field.placeholder}
                                     value={value}
-                                    onChange={(e) => {
-                                      const newItems = [...formData.items];
-                                      newItems[idx] = {
-                                        ...newItems[idx],
-                                        meta: { ...newItems[idx].meta, [field.key]: e.target.value }
-                                      };
-                                      setFormData({ ...formData, items: newItems });
-                                    }}
+                                    onChange={(e) => updateItemMeta(idx, field.key, e.target.value)}
                                     className="w-full px-2 py-1 border rounded text-sm"
                                   />
                                 )}

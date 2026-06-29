@@ -93,10 +93,10 @@ export default function Invoices() {
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
-  // ============ STATE UNTUK TEMPLATE & PPN/PPH ============
+  // ============ STATE UNTUK TEMPLATE & PPN ============
   const [selectedTemplate, setSelectedTemplate] = useState('general');
   const [includePpn, setIncludePpn] = useState(false);
-  const [includePph, setIncludePph] = useState(false);
+  const [includePph, setIncludePph] = useState(false); // Untuk pembayaran
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -198,11 +198,11 @@ export default function Invoices() {
     const subtotal = formData.items.reduce((sum, item) => sum + item.amount, 0);
     const ppnRate = currentCompany?.id === 1 ? 0.11 : 0.011;
     const ppn = includePpn ? Math.round(subtotal * ppnRate) : 0;
-    const pph = includePph ? Math.round(subtotal * 0.02) : 0;
-    return { subtotal, ppn, pph, total: subtotal + ppn - pph };
+    // PPh 23 TIDAK di invoice, hanya di pembayaran
+    return { subtotal, ppn, total: subtotal + ppn };
   };
 
-  const { subtotal, ppn, pph, total } = calculateTotals();
+  const { subtotal, ppn, total } = calculateTotals();
 
   const handleCreateCustomer = async () => {
     if (!newCustomer.name) {
@@ -295,9 +295,9 @@ export default function Invoices() {
         paid_amount: 0,
         template: selectedTemplate,
         include_ppn: includePpn,
-        include_pph: includePph,
+        include_pph: false, // PPh 23 di pembayaran
         ppn_amount: includePpn ? ppn : 0,
-        pph_amount: includePph ? pph : 0,
+        pph_amount: 0,
       }])
       .select();
 
@@ -398,6 +398,7 @@ export default function Invoices() {
     const remaining = invoice.total - (invoice.paid_amount || 0);
     setPaymentAmount(remaining.toString());
     setSelectedBankId(0);
+    setIncludePph(false);
     setShowPaymentModal(true);
   };
 
@@ -426,10 +427,29 @@ export default function Invoices() {
       return;
     }
     
-    const entries = [
+    // 🔥 ENTRIES JURNAL DENGAN PPH 23
+    const entries: any[] = [
       { account_id: bankAccount.id, account_code: bankAccount.code, account_name: bankAccount.name, debit: amount, credit: 0 },
       { account_id: receivableAcc.id, account_code: receivableAcc.code, account_name: receivableAcc.name, debit: 0, credit: amount },
     ];
+
+    // 🔥 TAMBAHKAN PPH 23 JIKA DIPILIH
+    let pphAmount = 0;
+    if (includePph) {
+      pphAmount = Math.round(amount * 0.02);
+      const pphAcc = await getDefaultAccount(currentCompany!.id, 'pph23');
+      if (pphAcc) {
+        entries.push({
+          account_id: pphAcc.id,
+          account_code: pphAcc.code,
+          account_name: pphAcc.name,
+          debit: 0,
+          credit: pphAmount,
+        });
+        // Kurangi debit bank
+        entries[0].debit = amount - pphAmount;
+      }
+    }
     
     const journalId = await createGeneralJournal(
       currentCompany!.id,
@@ -464,15 +484,17 @@ export default function Invoices() {
     await supabase.from('invoice_payments').insert([{
       invoice_id: selectedInvoice.id,
       payment_date: paymentDate,
-      amount: amount,
+      amount: amount - pphAmount,
+      pph_amount: pphAmount,
       payment_method: paymentMethod,
       bank_account_id: selectedBankId,
       created_by: user?.email,
     }]);
     
-    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat`);
+    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat${includePph ? ` (PPh 23: ${formatCurrency(pphAmount)})` : ''}`);
     setShowPaymentModal(false);
     setPaymentAmount('');
+    setIncludePph(false);
     fetchInvoices();
   };
 
@@ -796,7 +818,7 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {/* Template & PPN/PPh */}
+              {/* Template & PPN */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Template Invoice</label>
@@ -829,21 +851,11 @@ export default function Invoices() {
                     <input
                       type="checkbox"
                       checked={includePpn}
-                      onChange={e => {
-                        setIncludePpn(e.target.checked);
-                        // Reset items agar subtotal dihitung ulang
-                      }}
+                      onChange={e => setIncludePpn(e.target.checked)}
                     />
                     + {ppnLabel}
                   </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={includePph}
-                      onChange={e => setIncludePph(e.target.checked)}
-                    />
-                    - PPh 23 (2%)
-                  </label>
+                  {/* PPh 23 dihapus dari sini, pindah ke pembayaran */}
                 </div>
               </div>
 
@@ -917,7 +929,6 @@ export default function Invoices() {
                                         unit_price: newItems[idx].unit_price || 0,
                                         discount: newItems[idx].discount || 0,
                                       };
-                                      // Hitung amount
                                       const qty = newItems[idx].quantity || 1;
                                       const price = newItems[idx].unit_price || 0;
                                       const disc = newItems[idx].discount || 0;
@@ -969,13 +980,6 @@ export default function Invoices() {
                           <td></td>
                         </tr>
                       )}
-                      {includePph && (
-                        <tr>
-                          <td colSpan={fields.length} className="px-2 py-2 text-right font-medium">PPh 23 (2%)</td>
-                          <td className="px-2 py-2 text-right font-mono text-danger">({formatCurrency(pph)})</td>
-                          <td></td>
-                        </tr>
-                      )}
                       <tr className="font-bold">
                         <td colSpan={fields.length} className="px-2 py-2 text-right">TOTAL</td>
                         <td className="px-2 py-2 text-right text-accent">{formatCurrency(total)}</td>
@@ -1003,21 +1007,41 @@ export default function Invoices() {
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
-            <h2 className="font-display text-xl font-bold mb-4">Pembayaran Invoice</h2>
-            <button onClick={() => setShowPaymentModal(false)} className="float-right">✕</button>
-            <div className="space-y-4 mt-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold">Pembayaran Invoice</h2>
+              <button onClick={() => setShowPaymentModal(false)} className="text-text-muted hover:text-text">✕</button>
+            </div>
+            <div className="space-y-4">
               <div><p className="text-sm text-text-muted">No. Invoice</p><p className="font-semibold">{selectedInvoice.invoice_number}</p></div>
               <div><p className="text-sm text-text-muted">Total</p><p className="font-semibold">{formatCurrency(selectedInvoice.total)}</p></div>
               <div><p className="text-sm text-text-muted">Sudah Dibayar</p><p className="font-semibold text-success">{formatCurrency(selectedInvoice.paid_amount || 0)}</p></div>
               <div><p className="text-sm text-text-muted">Sisa</p><p className="font-semibold text-warning">{formatCurrency(selectedInvoice.total - (selectedInvoice.paid_amount || 0))}</p></div>
               <div><label className="block text-sm font-medium mb-1">Jumlah Bayar</label><input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
               <div><label className="block text-sm font-medium mb-1">Tanggal Bayar</label><input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium mb-1">Metode</label><select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border rounded-lg"><option value="transfer">Transfer</option><option value="cash">Tunai</option><option value="credit_card">Kartu Kredit</option></select></div>
+              <div><label className="block text-sm font-medium mb-1">Metode</label>
+                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
+                  <option value="transfer">Transfer</option>
+                  <option value="cash">Tunai</option>
+                  <option value="credit_card">Kartu Kredit</option>
+                </select>
+              </div>
               <div><label className="block text-sm font-medium mb-1">Akun Bank / Kas</label>
                 <select value={selectedBankId} onChange={e => setSelectedBankId(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg">
                   <option value={0}>-- Pilih Akun --</option>
                   {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
+              </div>
+              {/* 🔥 PPH 23 DI SINI */}
+              <div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={includePph}
+                    onChange={e => setIncludePph(e.target.checked)}
+                  />
+                  - Potong PPh 23 (2%)
+                </label>
+                <p className="text-xs text-text-muted mt-1">PPh 23 akan dipotong dari jumlah pembayaran</p>
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
@@ -1084,7 +1108,6 @@ export default function Invoices() {
               <p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p>
               <p><strong>Template:</strong> {getTemplateLabel(selectedInvoice.template || 'general')}</p>
               {selectedInvoice.include_ppn && <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn_amount || 0)}</p>}
-              {selectedInvoice.include_pph && <p><strong>PPh 23:</strong> {formatCurrency(selectedInvoice.pph_amount || 0)}</p>}
             </div>
             <div className="flex justify-end mt-6">
               <button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button>

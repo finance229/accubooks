@@ -73,7 +73,7 @@ export default function Ledger() {
   setLoading(true);
   
   try {
-    // Ambil semua jurnal lines untuk akun yang dipilih (dengan join manual)
+    // Ambil semua jurnal lines untuk akun yang dipilih
     const { data: journalLines, error } = await supabase
       .from('journal_lines')
       .select(`
@@ -98,7 +98,7 @@ export default function Ledger() {
       return;
     }
 
-    // Ambil data journals berdasarkan journal_id yang ada
+    // Ambil data journals
     const journalIds = journalLines.map(jl => jl.journal_id);
     const { data: journals, error: journalsError } = await supabase
       .from('journals')
@@ -116,16 +116,12 @@ export default function Ledger() {
       return;
     }
 
-    console.log('Journals found:', journals?.length);
-    console.log('Journal lines found:', journalLines?.length);
-
-    // Buat map journal untuk akses cepat
     const journalMap = new Map();
     journals?.forEach(j => {
       journalMap.set(j.id, j);
     });
 
-    // Hitung saldo awal (sebelum periode)
+    // 🔥 HITUNG SALDO AWAL DENGAN NORMAL BALANCE
     const { data: openingLines } = await supabase
       .from('journal_lines')
       .select('debit, credit, journal_id')
@@ -133,7 +129,6 @@ export default function Ledger() {
 
     let openingBalance = 0;
     if (openingLines && openingLines.length > 0) {
-      // Ambil journals untuk opening balance
       const openingJournalIds = [...new Set(openingLines.map(jl => jl.journal_id))];
       const { data: openingJournals } = await supabase
         .from('journals')
@@ -145,7 +140,15 @@ export default function Ledger() {
       
       openingLines.forEach(line => {
         if (openingJournalIdsSet.has(line.journal_id)) {
-          openingBalance += (line.debit - line.credit);
+          // 🔥 UNTUK ASET: Debit - Credit
+          // 🔥 UNTUK LIABILITAS & EKUITAS: Credit - Debit
+          if (selectedAccount.type === 'asset') {
+            openingBalance += (line.debit - line.credit);
+          } else if (selectedAccount.type === 'liability' || selectedAccount.type === 'equity') {
+            openingBalance += (line.credit - line.debit);
+          } else {
+            openingBalance += (line.debit - line.credit);
+          }
         }
       });
     }
@@ -154,7 +157,7 @@ export default function Ledger() {
     const entries: LedgerEntry[] = [];
     let runningBalance = openingBalance;
 
-    // Tambah saldo awal jika tidak nol
+    // Tambah saldo awal
     if (openingBalance !== 0) {
       entries.push({
         id: 0,
@@ -171,7 +174,15 @@ export default function Ledger() {
     journals?.forEach(journal => {
       const lines = journalLines.filter(jl => jl.journal_id === journal.id);
       lines.forEach(line => {
-        runningBalance = runningBalance + (line.debit - line.credit);
+        // 🔥 HITUNG SALDO BERJALAN SESUAI NORMAL BALANCE
+        if (selectedAccount.type === 'asset') {
+          runningBalance += (line.debit - line.credit);
+        } else if (selectedAccount.type === 'liability' || selectedAccount.type === 'equity') {
+          runningBalance += (line.credit - line.debit);
+        } else {
+          runningBalance += (line.debit - line.credit);
+        }
+        
         entries.push({
           id: line.id,
           date: journal.journal_date,
@@ -184,7 +195,6 @@ export default function Ledger() {
       });
     });
 
-    console.log('Ledger entries:', entries.length);
     setLedgerData(entries);
   } catch (error) {
     console.error('Error:', error);
@@ -411,9 +421,12 @@ export default function Ledger() {
                         <td className="px-6 py-3 whitespace-nowrap text-right text-sm font-mono text-danger">
                           {item.credit > 0 ? formatCurrency(item.credit) : '-'}
                         </td>
-                       <td className={`... ${item.balance < 0 ? 'text-danger' : 'text-info'}`}>
-  {item.balance < 0 ? '- ' : ''}{formatCurrency(item.balance)}
-</td>
+                        {/* 🔥 SALDO - TAMPILKAN MINUS JIKA NEGATIF */}
+                        <td className={`px-6 py-3 whitespace-nowrap text-right text-sm font-mono font-bold ${
+                          item.balance < 0 ? 'text-danger' : 'text-info'
+                        }`}>
+                          {item.balance < 0 ? '- ' : ''}{formatCurrency(Math.abs(item.balance))}
+                        </td>
                       </motion.tr>
                     ))
                   )}
@@ -428,8 +441,11 @@ export default function Ledger() {
                       <td className="px-6 py-4 text-right text-sm font-mono text-danger">
                         {formatCurrency(totalCredit)}
                       </td>
-                      <td className="px-6 py-4 text-right text-sm font-mono text-info">
-                        {formatCurrency(endingBalance)}
+                      {/* 🔥 ENDING BALANCE - TAMPILKAN MINUS JIKA NEGATIF */}
+                      <td className={`px-6 py-4 text-right text-sm font-mono font-bold ${
+                        endingBalance < 0 ? 'text-danger' : 'text-info'
+                      }`}>
+                        {endingBalance < 0 ? '- ' : ''}{formatCurrency(Math.abs(endingBalance))}
                       </td>
                     </tr>
                   </tfoot>
@@ -451,7 +467,9 @@ export default function Ledger() {
                   </div>
                   <div>
                     <p className="text-xs text-text-muted mb-1">Saldo Akhir</p>
-                    <p className="text-lg font-bold font-mono text-info">{formatCurrency(endingBalance)}</p>
+                    <p className={`text-lg font-bold font-mono ${endingBalance < 0 ? 'text-danger' : 'text-info'}`}>
+                      {endingBalance < 0 ? '- ' : ''}{formatCurrency(Math.abs(endingBalance))}
+                    </p>
                   </div>
                 </div>
               </div>

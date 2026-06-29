@@ -15,7 +15,6 @@ export const formatNumber = (amount: number) => {
   return new Intl.NumberFormat('id-ID').format(amount);
 };
 
-// ... sisanya sama seperti sebelumnya
 export const getCompanySuffix = (_companyId: number): string => {
   const suffixMap: Record<number, string> = {
     1: 'A',

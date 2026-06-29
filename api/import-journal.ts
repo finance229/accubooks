@@ -7,7 +7,23 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// ============ HELPER FUNCTIONS (COPY dari accountingHelpers) ============
+// ============ KONVERSI TANGGAL EXCEL ============
+function excelDateToDate(excelDate: number): string {
+  const epoch = new Date(1899, 11, 30);
+  const date = new Date(epoch.getTime() + excelDate * 86400000);
+  
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  
+  return `${day}/${month}/${year}`;
+}
+
+function isNumeric(value: any): boolean {
+  return !isNaN(parseFloat(value)) && isFinite(value);
+}
+
+// ============ HELPER FUNCTIONS ============
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -105,7 +121,7 @@ const createGeneralJournal = async (
   }
 };
 
-// ============ PARSE EXCEL FUNCTION (COPY dari excelParser) ============
+// ============ PARSE EXCEL ============
 type ImportRow = {
   rowIndex: number;
   tanggal: string;
@@ -185,7 +201,18 @@ async function parseExcelFile(file: File, companyId: number): Promise<ImportPrev
     if (!row || row.length === 0) continue;
     if (row.every(cell => cell === undefined || cell === null || cell === '')) continue;
 
-    const tanggalRaw = String(row[headerMap.tanggal] || '').trim();
+    // 🔥🔥🔥 PERBAIKAN: PARSING TANGGAL 🔥🔥🔥
+    let tanggalRaw = String(row[headerMap.tanggal] || '').trim();
+
+    // CEK APAKAH TANGGAL BERUPA ANGKA (FORMAT EXCEL DATE)
+    if (tanggalRaw && isNumeric(tanggalRaw)) {
+      const numValue = parseFloat(tanggalRaw);
+      if (numValue > 1 && numValue < 50000) {
+        tanggalRaw = excelDateToDate(numValue);
+        console.log(`📅 Excel date ${numValue} -> ${tanggalRaw}`);
+      }
+    }
+
     const keterangan = String(row[headerMap.keterangan] || '').trim();
     const namaCoa = String(row[headerMap.coa] || '').trim();
     const debitRaw = parseFloat(String(row[headerMap.debet] || '0').replace(/[^0-9,-]/g, '').replace(',', '.'));

@@ -89,14 +89,24 @@ export default function BalanceSheet() {
       const coaMap = new Map();
       coaList?.forEach(c => coaMap.set(c.id, c));
 
-      // Hitung saldo per akun (debit - credit)
+      // 🔥 PERBAIKAN 1: Hitung saldo per akun dengan benar
       const balanceMap = new Map<number, number>();
 
       lines.forEach((line: any) => {
         const coa = coaMap.get(line.coa_id);
         if (!coa) return;
 
-        const amount = (line.debit || 0) - (line.credit || 0);
+        // 🔥 UNTUK ASET: Debit = +, Credit = -
+        // 🔥 UNTUK LIABILITAS & EKUITAS: Debit = -, Credit = +
+        let amount = 0;
+        if (coa.type === 'asset') {
+          amount = (line.debit || 0) - (line.credit || 0);
+        } else if (coa.type === 'liability' || coa.type === 'equity') {
+          amount = (line.credit || 0) - (line.debit || 0);
+        } else {
+          amount = (line.debit || 0) - (line.credit || 0);
+        }
+        
         const current = balanceMap.get(coa.id) || 0;
         balanceMap.set(coa.id, current + amount);
       });
@@ -123,12 +133,19 @@ export default function BalanceSheet() {
         };
 
         if (coa.type === 'asset') {
-          assetsList.push(item);
-          totalAssets += balance;
+          // 🔥 PERBAIKAN 2: Hanya tampilkan aset dengan balance > 0
+          if (balance > 0) {
+            assetsList.push(item);
+            totalAssets += balance;
+          }
         } else if (coa.type === 'liability') {
-          liabilitiesList.push(item);
-          totalLiabilities += balance;
+          // 🔥 PERBAIKAN 3: Hanya tampilkan liabilitas dengan balance > 0
+          if (balance > 0) {
+            liabilitiesList.push(item);
+            totalLiabilities += balance;
+          }
         } else if (coa.type === 'equity') {
+          // 🔥 PERBAIKAN 4: Ekuitas bisa negatif (laba ditahan)
           equityList.push(item);
           totalEquity += balance;
         }
@@ -172,7 +189,13 @@ export default function BalanceSheet() {
 
   const generatePDFHTML = () => {
     const formatRp = (amount: number) => {
-      return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+      const absAmount = Math.abs(amount);
+      const formatted = new Intl.NumberFormat('id-ID', { 
+        style: 'currency', 
+        currency: 'IDR', 
+        minimumFractionDigits: 0 
+      }).format(absAmount);
+      return amount < 0 ? `-${formatted}` : formatted;
     };
 
     return `
@@ -193,6 +216,7 @@ export default function BalanceSheet() {
           .section-title { font-size: 14px; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 10px; }
           .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
           .total-row { display: flex; justify-content: space-between; padding: 8px 0; margin-top: 8px; border-top: 1px solid #ccc; font-weight: bold; }
+          .negative { color: #dc2626; }
           @media print { body { padding: 0; } }
         </style>
       </head>
@@ -217,8 +241,8 @@ export default function BalanceSheet() {
             </div>
             <div>
               <div style="font-weight: bold; margin-bottom: 5px;">Ekuitas</div>
-              ${data.equity.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
-              <div class="total-row"><span>Total Ekuitas</span><span>${formatRp(data.totalEquity)}</span></div>
+              ${data.equity.map(item => `<div class="row"><span>${item.account_name}</span><span class="${item.balance < 0 ? 'negative' : ''}">${formatRp(item.balance)}</span></div>`).join('')}
+              <div class="total-row"><span>Total Ekuitas</span><span class="${data.totalEquity < 0 ? 'negative' : ''}">${formatRp(data.totalEquity)}</span></div>
             </div>
             <div class="total-row" style="margin-top: 15px; border-top: 2px solid #000;">
               <span>TOTAL PASIVA</span>
@@ -374,13 +398,17 @@ export default function BalanceSheet() {
                     data.equity.map((item, idx) => (
                       <div key={idx} className="flex justify-between py-1">
                         <span className="text-text">{item.account_name}</span>
-                        <span>{formatCurrency(item.balance)}</span>
+                        <span className={item.balance < 0 ? 'text-danger' : ''}>
+                          {formatCurrency(item.balance)}
+                        </span>
                       </div>
                     ))
                   )}
                   <div className="flex justify-between pt-2 mt-2 border-t font-semibold">
                     <span>Total Ekuitas</span>
-                    <span>{formatCurrency(data.totalEquity)}</span>
+                    <span className={data.totalEquity < 0 ? 'text-danger' : ''}>
+                      {formatCurrency(data.totalEquity)}
+                    </span>
                   </div>
                 </div>
 

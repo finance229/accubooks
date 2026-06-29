@@ -50,7 +50,6 @@ export default function IncomeStatement() {
     setLoading(true);
 
     try {
-      // 🔥 AMBIL SEMUA JURNAL + LINES DENGAN FILTER TANGGAL
       const { data: journals, error: jError } = await supabase
         .from('journals')
         .select('id, journal_date')
@@ -73,7 +72,6 @@ export default function IncomeStatement() {
 
       const journalIds = journals.map(j => j.id);
 
-      // Ambil journal lines
       const { data: lines, error: lError } = await supabase
         .from('journal_lines')
         .select('debit, credit, coa_id')
@@ -85,7 +83,6 @@ export default function IncomeStatement() {
         return;
       }
 
-      // Ambil COA
       const { data: coaList } = await supabase
         .from('coa')
         .select('id, code, name, type')
@@ -94,7 +91,6 @@ export default function IncomeStatement() {
       const coaMap = new Map();
       coaList?.forEach(c => coaMap.set(c.id, c));
 
-      // Hitung pendapatan dan beban per akun
       const revenueMap = new Map<number, number>();
       const expenseMap = new Map<number, number>();
 
@@ -113,7 +109,6 @@ export default function IncomeStatement() {
         }
       });
 
-      // Build data
       const revenueList: AccountBalance[] = [];
       let totalRevenue = 0;
       revenueMap.forEach((balance, coaId) => {
@@ -150,7 +145,6 @@ export default function IncomeStatement() {
         }
       });
 
-      // Sort
       revenueList.sort((a, b) => a.account_code.localeCompare(b.account_code));
       expensesList.sort((a, b) => a.account_code.localeCompare(b.account_code));
 
@@ -176,7 +170,6 @@ export default function IncomeStatement() {
     });
   };
 
-  // ========== DOWNLOAD PDF ==========
   const handleDownloadPDF = () => {
     const printWindow = window.open('', '_blank');
     const html = generatePDFHTML();
@@ -185,8 +178,15 @@ export default function IncomeStatement() {
   };
 
   const generatePDFHTML = () => {
+    // 🔥 PERBAIKAN: support minus
     const formatRp = (amount: number) => {
-      return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+      const absAmount = Math.abs(amount);
+      const formatted = new Intl.NumberFormat('id-ID', { 
+        style: 'currency', 
+        currency: 'IDR', 
+        minimumFractionDigits: 0 
+      }).format(absAmount);
+      return amount < 0 ? `-${formatted}` : formatted;
     };
 
     return `
@@ -207,6 +207,7 @@ export default function IncomeStatement() {
           .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
           .total-row { display: flex; justify-content: space-between; padding: 8px 0; margin-top: 8px; border-top: 1px solid #ccc; font-weight: bold; }
           .net-income { background: #f0f0f0; padding: 10px; margin-top: 20px; font-weight: bold; font-size: 14px; display: flex; justify-content: space-between; }
+          .negative { color: #dc2626; }
           @media print { body { padding: 0; } }
         </style>
       </head>
@@ -226,14 +227,16 @@ export default function IncomeStatement() {
           ${data.expenses.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
           <div class="total-row"><span>TOTAL BEBAN</span><span>${formatRp(data.totalExpenses)}</span></div>
         </div>
-        <div class="net-income"><span>LABA BERSIH</span><span>${formatRp(data.netIncome)}</span></div>
+        <div class="net-income">
+          <span>LABA BERSIH</span>
+          <span class="${data.netIncome < 0 ? 'negative' : ''}">${formatRp(data.netIncome)}</span>
+        </div>
         <div style="margin-top: 30px; font-size: 10px; text-align: center;">Dicetak: ${new Date().toLocaleDateString('id-ID')}</div>
       </body>
       </html>
     `;
   };
 
-  // ========== DOWNLOAD EXCEL ==========
   const handleDownloadExcel = () => {
     let csvContent = "LAPORAN LABA RUGI\n\n";
     csvContent += `Periode: ${formatDate(startDate)} s/d ${formatDate(endDate)}\n\n`;
@@ -327,7 +330,6 @@ export default function IncomeStatement() {
               <p className="text-sm">{currentCompany.name}</p>
             </div>
 
-            {/* PENDAPATAN */}
             <div className="mb-8">
               <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">PENDAPATAN</h3>
               {data.revenue.length === 0 ? (
@@ -346,7 +348,6 @@ export default function IncomeStatement() {
               </div>
             </div>
 
-            {/* BEBAN */}
             <div className="mb-8">
               <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">BEBAN</h3>
               {data.expenses.length === 0 ? (
@@ -365,7 +366,6 @@ export default function IncomeStatement() {
               </div>
             </div>
 
-            {/* LABA BERSIH */}
             <div className="bg-info/10 p-4 rounded-lg">
               <div className="flex justify-between font-bold text-xl">
                 <span>LABA BERSIH</span>

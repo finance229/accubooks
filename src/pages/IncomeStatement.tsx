@@ -50,49 +50,109 @@ export default function IncomeStatement() {
     setLoading(true);
 
     try {
-      // Ambil data dari view income_statement
-      const { data: viewData, error } = await supabase
-        .from('income_statement')
-        .select('*')
+      // 🔥 AMBIL SEMUA JURNAL + LINES DENGAN FILTER TANGGAL
+      const { data: journals, error: jError } = await supabase
+        .from('journals')
+        .select('id, journal_date')
+        .eq('company_id', currentCompany.id)
+        .eq('status', 'posted')
+        .gte('journal_date', startDate)
+        .lte('journal_date', endDate);
+
+      if (jError) {
+        console.error('Error fetching journals:', jError);
+        setLoading(false);
+        return;
+      }
+
+      if (!journals || journals.length === 0) {
+        setData({ revenue: [], expenses: [], totalRevenue: 0, totalExpenses: 0, netIncome: 0 });
+        setLoading(false);
+        return;
+      }
+
+      const journalIds = journals.map(j => j.id);
+
+      // Ambil journal lines
+      const { data: lines, error: lError } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, coa_id')
+        .in('journal_id', journalIds);
+
+      if (lError || !lines) {
+        console.error('Error fetching journal lines:', lError);
+        setLoading(false);
+        return;
+      }
+
+      // Ambil COA
+      const { data: coaList } = await supabase
+        .from('coa')
+        .select('id, code, name, type')
         .eq('company_id', currentCompany.id);
 
-      if (error) {
-        console.error('Error fetching income statement:', error);
-        setLoading(false);
-        return;
-      }
+      const coaMap = new Map();
+      coaList?.forEach(c => coaMap.set(c.id, c));
 
-      console.log('Income statement data:', viewData);
+      // Hitung pendapatan dan beban per akun
+      const revenueMap = new Map<number, number>();
+      const expenseMap = new Map<number, number>();
 
-      if (!viewData || viewData.length === 0) {
-        setLoading(false);
-        return;
-      }
+      lines.forEach((line: any) => {
+        const coa = coaMap.get(line.coa_id);
+        if (!coa) return;
 
-      // Filter dan mapping untuk pendapatan
-      const revenueList = viewData
-        .filter(item => item.account_type === 'revenue' && item.balance !== 0)
-        .map(item => ({
-          id: item.coa_id,
-          account_code: item.account_code,
-          account_name: item.account_name,
-          balance: item.balance,
-          type: item.account_type,
-        }));
+        const amount = (line.debit || 0) - (line.credit || 0);
 
-      // Filter dan mapping untuk beban
-      const expensesList = viewData
-        .filter(item => item.account_type === 'expense' && item.balance !== 0)
-        .map(item => ({
-          id: item.coa_id,
-          account_code: item.account_code,
-          account_name: item.account_name,
-          balance: item.balance,
-          type: item.account_type,
-        }));
+        if (coa.type === 'revenue') {
+          const current = revenueMap.get(coa.id) || 0;
+          revenueMap.set(coa.id, current + amount);
+        } else if (coa.type === 'expense') {
+          const current = expenseMap.get(coa.id) || 0;
+          expenseMap.set(coa.id, current + Math.abs(amount));
+        }
+      });
 
-      const totalRevenue = revenueList.reduce((sum, r) => sum + r.balance, 0);
-      const totalExpenses = expensesList.reduce((sum, e) => sum + e.balance, 0);
+      // Build data
+      const revenueList: AccountBalance[] = [];
+      let totalRevenue = 0;
+      revenueMap.forEach((balance, coaId) => {
+        if (balance !== 0) {
+          const coa = coaList?.find(c => c.id === coaId);
+          if (coa) {
+            revenueList.push({
+              id: coa.id,
+              account_code: coa.code,
+              account_name: coa.name,
+              balance: balance,
+              type: 'revenue',
+            });
+            totalRevenue += balance;
+          }
+        }
+      });
+
+      const expensesList: AccountBalance[] = [];
+      let totalExpenses = 0;
+      expenseMap.forEach((balance, coaId) => {
+        if (balance !== 0) {
+          const coa = coaList?.find(c => c.id === coaId);
+          if (coa) {
+            expensesList.push({
+              id: coa.id,
+              account_code: coa.code,
+              account_name: coa.name,
+              balance: balance,
+              type: 'expense',
+            });
+            totalExpenses += balance;
+          }
+        }
+      });
+
+      // Sort
+      revenueList.sort((a, b) => a.account_code.localeCompare(b.account_code));
+      expensesList.sort((a, b) => a.account_code.localeCompare(b.account_code));
 
       setData({
         revenue: revenueList,

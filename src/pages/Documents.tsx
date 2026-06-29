@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { FileText, Upload, Search, Filter, Trash2, Eye, Download } from 'lucide-react';
+import { FileText, Upload, Search, Filter, Trash2, Eye, Download, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { uploadToGoogleDrive } from '../lib/googleDrive';
+import { useNavigate } from 'react-router-dom';
 
 type Document = {
   id: string;
@@ -13,9 +14,13 @@ type Document = {
   file_url: string;
   type: string;
   created_at: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  reference_number: string | null;
 };
 
 export default function Documents() {
+  const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -25,7 +30,7 @@ export default function Documents() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedType, setSelectedType] = useState<'invoice' | 'receipt' | 'contract' | 'other'>('invoice');
+  const [selectedType, setSelectedType] = useState<'invoice' | 'ap' | 'payment_request' | 'other'>('other');
 
   useEffect(() => {
     if (currentCompany?.id) {
@@ -100,25 +105,53 @@ export default function Documents() {
     }
   };
 
+  const getReferenceLink = (doc: Document) => {
+    if (!doc.reference_type || !doc.reference_id) return null;
+
+    const routes: Record<string, string> = {
+      'invoice': '/invoices',
+      'ap': '/purchase-invoices',
+      'payment_request': '/payment-requests',
+    };
+
+    const basePath = routes[doc.reference_type];
+    if (!basePath) return null;
+
+    return {
+      path: `${basePath}/${doc.reference_id}`,
+      label: doc.reference_number || `#${doc.reference_id}`,
+      typeLabel: doc.reference_type === 'invoice' ? 'Invoice' :
+                 doc.reference_type === 'ap' ? 'Account Payable' :
+                 'Payment Request'
+    };
+  };
+
+  const getTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      invoice: 'Invoice AR',
+      ap: 'Account Payable',
+      payment_request: 'Payment Request',
+      other: 'Lainnya',
+    };
+    return labels[type] || type;
+  };
+
+  const getTypeColor = (type: string) => {
+    const colors: Record<string, string> = {
+      invoice: 'bg-green-100 text-green-800',
+      ap: 'bg-blue-100 text-blue-800',
+      payment_request: 'bg-purple-100 text-purple-800',
+      other: 'bg-gray-100 text-gray-800',
+    };
+    return colors[type] || 'bg-gray-100 text-gray-800';
+  };
+
   const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (doc.reference_number && doc.reference_number.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesFilter = filterType === 'all' || doc.type === filterType;
     return matchesSearch && matchesFilter;
   });
-
-  const stats = {
-    total: documents.length,
-    invoices: documents.filter(d => d.type === 'invoice').length,
-    receipts: documents.filter(d => d.type === 'receipt').length,
-    contracts: documents.filter(d => d.type === 'contract').length,
-  };
-
-  const documentTypes = [
-    { value: 'invoice', label: 'Invoice/Faktur', color: 'blue' },
-    { value: 'receipt', label: 'Kwitansi', color: 'green' },
-    { value: 'contract', label: 'Kontrak', color: 'purple' },
-    { value: 'other', label: 'Lainnya', color: 'gray' },
-  ];
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString('id-ID', {
@@ -127,6 +160,21 @@ export default function Documents() {
       year: 'numeric',
     });
   };
+
+  const stats = {
+    total: documents.length,
+    invoices: documents.filter(d => d.type === 'invoice').length,
+    ap: documents.filter(d => d.type === 'ap').length,
+    paymentRequests: documents.filter(d => d.type === 'payment_request').length,
+  };
+
+  const documentTypes = [
+    { value: 'all', label: 'Semua' },
+    { value: 'invoice', label: 'Invoice AR', color: 'green' },
+    { value: 'ap', label: 'Account Payable', color: 'blue' },
+    { value: 'payment_request', label: 'Payment Request', color: 'purple' },
+    { value: 'other', label: 'Lainnya', color: 'gray' },
+  ];
 
   if (!currentCompany) {
     return <div className="flex justify-center py-12">Loading...</div>;
@@ -148,12 +196,13 @@ export default function Documents() {
         </button>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
           { label: 'Total Dokumen', value: stats.total, icon: FileText, color: 'blue' },
-          { label: 'Invoice', value: stats.invoices, icon: FileText, color: 'green' },
-          { label: 'Kwitansi', value: stats.receipts, icon: FileText, color: 'purple' },
-          { label: 'Kontrak', value: stats.contracts, icon: FileText, color: 'orange' },
+          { label: 'Invoice AR', value: stats.invoices, icon: FileText, color: 'green' },
+          { label: 'Account Payable', value: stats.ap, icon: FileText, color: 'purple' },
+          { label: 'Payment Request', value: stats.paymentRequests, icon: FileText, color: 'orange' },
         ].map((stat, index) => (
           <motion.div
             key={stat.label}
@@ -175,6 +224,7 @@ export default function Documents() {
         ))}
       </div>
 
+      {/* Upload Form */}
       {showUpload && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -186,7 +236,7 @@ export default function Documents() {
           <div className="mb-6">
             <label className="block text-sm font-medium text-text mb-3">Tipe Dokumen</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {documentTypes.map((type) => (
+              {documentTypes.filter(t => t.value !== 'all').map((type) => (
                 <button
                   key={type.value}
                   onClick={() => setSelectedType(type.value as any)}
@@ -241,6 +291,7 @@ export default function Documents() {
         </motion.div>
       )}
 
+      {/* Search & Filter */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -252,29 +303,32 @@ export default function Documents() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
             <input
               type="text"
-              placeholder="Cari dokumen..."
+              placeholder="Cari dokumen atau nomor referensi..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Filter className="w-5 h-5 text-text-muted" />
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="px-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-surface"
-            >
-              <option value="all">Semua Tipe</option>
-              <option value="invoice">Invoice</option>
-              <option value="receipt">Kwitansi</option>
-              <option value="contract">Kontrak</option>
-              <option value="other">Lainnya</option>
-            </select>
+            {documentTypes.map((type) => (
+              <button
+                key={type.value}
+                onClick={() => setFilterType(type.value)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  filterType === type.value
+                    ? 'bg-accent text-white'
+                    : 'border border-border hover:bg-background'
+                }`}
+              >
+                {type.label}
+              </button>
+            ))}
           </div>
         </div>
       </motion.div>
 
+      {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -289,33 +343,83 @@ export default function Documents() {
             <p>Belum ada dokumen</p>
           </div>
         ) : (
-          <div className="divide-y divide-border">
-            {filteredDocuments.map((doc) => (
-              <div key={doc.id} className="p-4 hover:bg-background transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-accent" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text truncate">{doc.name}</p>
-                      <p className="text-xs text-text-muted mt-0.5">{formatDate(doc.created_at)} • {doc.type}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => window.open(doc.file_url, '_blank')} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg" title="Lihat">
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <a href={doc.file_url} download className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg" title="Download">
-                      <Download className="w-4 h-4" />
-                    </a>
-                    <button onClick={() => handleDelete(doc.id)} className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg" title="Hapus">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-background">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Nama Dokumen</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tipe</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Referensi</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Tanggal Upload</th>
+                  <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredDocuments.map((doc) => {
+                  const ref = getReferenceLink(doc);
+                  return (
+                    <tr key={doc.id} className="hover:bg-background transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                            <FileText className="w-5 h-5 text-accent" />
+                          </div>
+                          <span className="text-sm font-medium text-text">{doc.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getTypeColor(doc.type)}`}>
+                          {getTypeLabel(doc.type)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {ref ? (
+                          <button
+                            onClick={() => navigate(ref.path)}
+                            className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                          >
+                            <FileText className="w-3 h-3" />
+                            {ref.label}
+                            <span className="text-xs text-text-muted ml-1">({ref.typeLabel})</span>
+                          </button>
+                        ) : (
+                          <span className="text-sm text-text-muted">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-text-muted">
+                        {formatDate(doc.created_at)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => window.open(doc.file_url, '_blank')}
+                            className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg transition-colors"
+                            title="Lihat"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <a
+                            href={doc.file_url}
+                            download
+                            className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg transition-colors"
+                            title="Download"
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                          <button
+                            onClick={() => handleDelete(doc.id)}
+                            className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
+                            title="Hapus"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </motion.div>

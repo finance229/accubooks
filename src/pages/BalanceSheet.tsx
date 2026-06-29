@@ -86,7 +86,6 @@ export default function BalanceSheet() {
       const coaMap = new Map();
       coaList?.forEach(c => coaMap.set(c.id, c));
 
-      // 🔥 HITUNG SALDO PER AKUN DENGAN NORMAL BALANCE
       const balanceMap = new Map<number, number>();
 
       lines.forEach((line: any) => {
@@ -94,19 +93,19 @@ export default function BalanceSheet() {
         if (!coa) return;
 
         let amount = 0;
-        // Aset: Debit - Credit
+        // 🔥 Aset: Debit - Credit
         if (coa.type === 'asset') {
           amount = (line.debit || 0) - (line.credit || 0);
         } 
-        // Liabilitas & Ekuitas: Credit - Debit
+        // 🔥 Liabilitas & Ekuitas: Credit - Debit
         else if (coa.type === 'liability' || coa.type === 'equity') {
           amount = (line.credit || 0) - (line.debit || 0);
         } 
-        // Revenue: Credit - Debit
+        // 🔥 Revenue: Credit - Debit
         else if (coa.type === 'revenue') {
           amount = (line.credit || 0) - (line.debit || 0);
         }
-        // Expense: Debit - Credit
+        // 🔥 Expense: Debit - Credit
         else if (coa.type === 'expense') {
           amount = (line.debit || 0) - (line.credit || 0);
         }
@@ -115,7 +114,6 @@ export default function BalanceSheet() {
         balanceMap.set(coa.id, current + amount);
       });
 
-      // 🔥 KATEGORIKAN
       const assetsList: AccountBalance[] = [];
       const liabilitiesList: AccountBalance[] = [];
       const equityList: AccountBalance[] = [];
@@ -393,15 +391,15 @@ export default function BalanceSheet() {
                       <div key={idx} className="flex justify-between py-1">
                         <span className="text-text">{item.account_name}</span>
                         <span className={item.balance < 0 ? 'text-danger' : ''}>
-  {item.balance < 0 ? '- ' : ''}{formatCurrency(item.balance)}
-</span>
+                          {item.balance < 0 ? '- ' : ''}{formatCurrency(Math.abs(item.balance))}
+                        </span>
                       </div>
                     ))
                   )}
                   <div className="flex justify-between pt-2 mt-2 border-t font-semibold">
                     <span>Total Ekuitas</span>
                     <span className={data.totalEquity < 0 ? 'text-danger' : ''}>
-                      {formatCurrency(data.totalEquity)}
+                      {data.totalEquity < 0 ? '- ' : ''}{formatCurrency(Math.abs(data.totalEquity))}
                     </span>
                   </div>
                 </div>

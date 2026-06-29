@@ -101,11 +101,13 @@ export default function IncomeStatement() {
         const amount = (line.debit || 0) - (line.credit || 0);
 
         if (coa.type === 'revenue') {
+          // 🔥 Revenue: Credit - Debit
           const current = revenueMap.get(coa.id) || 0;
-          revenueMap.set(coa.id, current + amount);
+          revenueMap.set(coa.id, current + (line.credit || 0) - (line.debit || 0));
         } else if (coa.type === 'expense') {
+          // 🔥 Expense: Debit - Credit
           const current = expenseMap.get(coa.id) || 0;
-          expenseMap.set(coa.id, current + Math.abs(amount));
+          expenseMap.set(coa.id, current + (line.debit || 0) - (line.credit || 0));
         }
       });
 
@@ -178,15 +180,12 @@ export default function IncomeStatement() {
   };
 
   const generatePDFHTML = () => {
-    // 🔥 PERBAIKAN: support minus
     const formatRp = (amount: number) => {
-      const absAmount = Math.abs(amount);
-      const formatted = new Intl.NumberFormat('id-ID', { 
+      return new Intl.NumberFormat('id-ID', { 
         style: 'currency', 
         currency: 'IDR', 
         minimumFractionDigits: 0 
-      }).format(absAmount);
-      return amount < 0 ? `-${formatted}` : formatted;
+      }).format(Math.abs(amount));
     };
 
     return `
@@ -219,17 +218,19 @@ export default function IncomeStatement() {
         </div>
         <div class="section">
           <div class="section-title">PENDAPATAN</div>
-          ${data.revenue.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
-          <div class="total-row"><span>TOTAL PENDAPATAN</span><span>${formatRp(data.totalRevenue)}</span></div>
+          ${data.revenue.map(item => `<div class="row"><span>${item.account_name}</span><span>Rp ${new Intl.NumberFormat('id-ID').format(Math.abs(item.balance))}</span></div>`).join('')}
+          <div class="total-row"><span>TOTAL PENDAPATAN</span><span>Rp ${new Intl.NumberFormat('id-ID').format(Math.abs(data.totalRevenue))}</span></div>
         </div>
         <div class="section">
           <div class="section-title">BEBAN</div>
-          ${data.expenses.map(item => `<div class="row"><span>${item.account_name}</span><span>${formatRp(item.balance)}</span></div>`).join('')}
-          <div class="total-row"><span>TOTAL BEBAN</span><span>${formatRp(data.totalExpenses)}</span></div>
+          ${data.expenses.map(item => `<div class="row"><span>${item.account_name}</span><span>Rp ${new Intl.NumberFormat('id-ID').format(Math.abs(item.balance))}</span></div>`).join('')}
+          <div class="total-row"><span>TOTAL BEBAN</span><span>Rp ${new Intl.NumberFormat('id-ID').format(Math.abs(data.totalExpenses))}</span></div>
         </div>
         <div class="net-income">
           <span>LABA BERSIH</span>
-          <span class="${data.netIncome < 0 ? 'negative' : ''}">${formatRp(data.netIncome)}</span>
+          <span class="${data.netIncome < 0 ? 'negative' : ''}">
+            ${data.netIncome < 0 ? '- ' : ''}Rp ${new Intl.NumberFormat('id-ID').format(Math.abs(data.netIncome))}
+          </span>
         </div>
         <div style="margin-top: 30px; font-size: 10px; text-align: center;">Dicetak: ${new Date().toLocaleDateString('id-ID')}</div>
       </body>
@@ -366,12 +367,13 @@ export default function IncomeStatement() {
               </div>
             </div>
 
+            {/* 🔥 LABA BERSIH - FIX */}
             <div className="bg-info/10 p-4 rounded-lg">
               <div className="flex justify-between font-bold text-xl">
                 <span>LABA BERSIH</span>
                 <span className={data.netIncome >= 0 ? 'text-success' : 'text-danger'}>
-  {data.netIncome < 0 ? '- ' : ''}{formatCurrency(data.netIncome)}
-</span>
+                  {data.netIncome < 0 ? '- ' : ''}{formatCurrency(Math.abs(data.netIncome))}
+                </span>
               </div>
             </div>
           </>

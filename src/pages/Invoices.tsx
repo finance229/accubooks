@@ -175,7 +175,7 @@ export default function Invoices() {
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
-  // 🔥 UPDATE ITEM META DAN HITUNG AMOUNT OTOMATIS
+  // 🔥 UPDATE ITEM META DAN HITUNG AMOUNT OTOMATIS - FIX GENERAL
   const updateItemMeta = (index: number, fieldKey: string, value: any) => {
     const newItems = [...formData.items];
     const item = newItems[index];
@@ -184,10 +184,15 @@ export default function Invoices() {
 
     // 🔥 HITUNG AMOUNT BERDASARKAN TEMPLATE
     if (selectedTemplate === 'general') {
-      const qty = item.quantity || 1;
-      const price = item.unit_price || 0;
-      const disc = item.discount || 0;
+      // Ambil nilai dari meta (karena input general pakai meta)
+      const qty = parseFloat(item.meta.quantity) || 1;
+      const price = parseFloat(item.meta.unit_price) || 0;
+      const disc = parseFloat(item.meta.discount) || 0;
       item.amount = (qty * price) - disc;
+      // Update item agar database tersimpan dengan benar
+      item.quantity = qty;
+      item.unit_price = price;
+      item.discount = disc;
     } else if (selectedTemplate === 'a') {
       const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
       const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
@@ -209,7 +214,7 @@ export default function Invoices() {
     setFormData({ ...formData, items: newItems });
   };
 
-  // 🔥 UPDATE ITEM UNTUK GENERAL (DESKRIPSI, QTY, DLL)
+  // 🔥 UPDATE ITEM UNTUK GENERAL (DESKRIPSI, QTY, DLL) - alternatif jika pakai updateItem
   const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
@@ -640,7 +645,6 @@ export default function Invoices() {
       alert('Hanya invoice status draft yang bisa diedit');
       return;
     }
-    // Di sini nanti bisa diimplementasikan untuk buka modal edit
     alert(`Edit invoice ${invoice.invoice_number} - fitur akan menyusul`);
   };
 

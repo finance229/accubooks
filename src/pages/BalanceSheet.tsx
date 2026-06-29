@@ -46,7 +46,6 @@ export default function BalanceSheet() {
     setLoading(true);
 
     try {
-      // 🔥 AMBIL SEMUA JURNAL SAMPAI TANGGAL TERTENTU
       const { data: journals, error: jError } = await supabase
         .from('journals')
         .select('id')
@@ -68,7 +67,6 @@ export default function BalanceSheet() {
 
       const journalIds = journals.map(j => j.id);
 
-      // Ambil journal lines
       const { data: lines, error: lError } = await supabase
         .from('journal_lines')
         .select('debit, credit, coa_id')
@@ -80,7 +78,6 @@ export default function BalanceSheet() {
         return;
       }
 
-      // Ambil COA
       const { data: coaList } = await supabase
         .from('coa')
         .select('id, code, name, type')
@@ -89,21 +86,28 @@ export default function BalanceSheet() {
       const coaMap = new Map();
       coaList?.forEach(c => coaMap.set(c.id, c));
 
-      // 🔥 PERBAIKAN 1: Hitung saldo per akun dengan benar
+      // 🔥 HITUNG SALDO PER AKUN DENGAN NORMAL BALANCE
       const balanceMap = new Map<number, number>();
 
       lines.forEach((line: any) => {
         const coa = coaMap.get(line.coa_id);
         if (!coa) return;
 
-        // 🔥 UNTUK ASET: Debit = +, Credit = -
-        // 🔥 UNTUK LIABILITAS & EKUITAS: Debit = -, Credit = +
         let amount = 0;
+        // Aset: Debit - Credit
         if (coa.type === 'asset') {
           amount = (line.debit || 0) - (line.credit || 0);
-        } else if (coa.type === 'liability' || coa.type === 'equity') {
+        } 
+        // Liabilitas & Ekuitas: Credit - Debit
+        else if (coa.type === 'liability' || coa.type === 'equity') {
           amount = (line.credit || 0) - (line.debit || 0);
-        } else {
+        } 
+        // Revenue: Credit - Debit
+        else if (coa.type === 'revenue') {
+          amount = (line.credit || 0) - (line.debit || 0);
+        }
+        // Expense: Debit - Credit
+        else if (coa.type === 'expense') {
           amount = (line.debit || 0) - (line.credit || 0);
         }
         
@@ -111,7 +115,7 @@ export default function BalanceSheet() {
         balanceMap.set(coa.id, current + amount);
       });
 
-      // Kategorikan berdasarkan type
+      // 🔥 KATEGORIKAN
       const assetsList: AccountBalance[] = [];
       const liabilitiesList: AccountBalance[] = [];
       const equityList: AccountBalance[] = [];
@@ -133,25 +137,21 @@ export default function BalanceSheet() {
         };
 
         if (coa.type === 'asset') {
-          // 🔥 PERBAIKAN 2: Hanya tampilkan aset dengan balance > 0
           if (balance > 0) {
             assetsList.push(item);
             totalAssets += balance;
           }
         } else if (coa.type === 'liability') {
-          // 🔥 PERBAIKAN 3: Hanya tampilkan liabilitas dengan balance > 0
           if (balance > 0) {
             liabilitiesList.push(item);
             totalLiabilities += balance;
           }
         } else if (coa.type === 'equity') {
-          // 🔥 PERBAIKAN 4: Ekuitas bisa negatif (laba ditahan)
           equityList.push(item);
           totalEquity += balance;
         }
       });
 
-      // Sort
       assetsList.sort((a, b) => a.account_code.localeCompare(b.account_code));
       liabilitiesList.sort((a, b) => a.account_code.localeCompare(b.account_code));
       equityList.sort((a, b) => a.account_code.localeCompare(b.account_code));
@@ -179,7 +179,6 @@ export default function BalanceSheet() {
     });
   };
 
-  // ========== DOWNLOAD PDF ==========
   const handleDownloadPDF = () => {
     const printWindow = window.open('', '_blank');
     const html = generatePDFHTML();
@@ -256,7 +255,6 @@ export default function BalanceSheet() {
     `;
   };
 
-  // ========== DOWNLOAD EXCEL ==========
   const handleDownloadExcel = () => {
     let csvContent = "NERACA\n\n";
     csvContent += `Per Tanggal: ${formatDate(asOfDate)}\n\n`;
@@ -347,7 +345,6 @@ export default function BalanceSheet() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* KOLOM KIRI: AKTIVA */}
               <div>
                 <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">AKTIVA (ASET)</h3>
                 {data.assets.length === 0 ? (
@@ -366,11 +363,9 @@ export default function BalanceSheet() {
                 </div>
               </div>
 
-              {/* KOLOM KANAN: PASIVA */}
               <div>
                 <h3 className="font-bold text-lg border-b-2 border-accent pb-2 mb-4">PASIVA</h3>
                 
-                {/* Kewajiban */}
                 <div className="mb-4">
                   <h4 className="font-semibold text-md mb-2">Kewajiban (Liabilitas)</h4>
                   {data.liabilities.length === 0 ? (
@@ -389,7 +384,6 @@ export default function BalanceSheet() {
                   </div>
                 </div>
 
-                {/* Ekuitas */}
                 <div>
                   <h4 className="font-semibold text-md mb-2">Ekuitas</h4>
                   {data.equity.length === 0 ? (
@@ -412,7 +406,6 @@ export default function BalanceSheet() {
                   </div>
                 </div>
 
-                {/* Total Pasiva */}
                 <div className="flex justify-between pt-3 mt-3 border-t-2 border-accent font-bold text-lg">
                   <span>TOTAL PASIVA</span>
                   <span>{formatCurrency(data.totalLiabilities + data.totalEquity)}</span>

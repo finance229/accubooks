@@ -70,7 +70,6 @@ function generateBaseHTML(
   itemsHtml: string,
   totalSubtotal: number,
   ppnAmount: number,
-  pphAmount: number,
   grandTotal: number,
   paidAmount: number,
   remainingAmount: number,
@@ -184,7 +183,6 @@ function generateBaseHTML(
       <table class="summary-table">
         <tr><td style="width: 70%; text-align: right;">Subtotal</td><td style="width: 30%; text-align: right;">${formatRupiah(totalSubtotal)}</td></tr>
         ${invoice.include_ppn ? `<tr><td style="text-align: right;">${ppnLabel}</td><td style="text-align: right;">${formatRupiah(ppnAmount)}</td></tr>` : ''}
-        ${invoice.include_pph ? `<tr><td style="text-align: right;">PPh 23 (2%)</td><td style="text-align: right;">(${formatRupiah(pphAmount)})</td></tr>` : ''}
         <tr class="grand-total"><td style="text-align: right;"><strong>Grand Total</strong></td><td style="text-align: right;"><strong>${formatRupiah(grandTotal)}</strong></td></tr>
         ${paidAmount > 0 ? `
         <tr><td style="text-align: right; color: #059669;">Sudah Dibayar</td><td style="text-align: right; color: #059669;">(${formatRupiah(paidAmount)})</td></tr>
@@ -235,7 +233,7 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
   let totalSubtotal = 0;
 
   items.forEach((item) => {
-    const itemTotal = item.quantity * item.unit_price;
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0) - (item.discount || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
@@ -248,13 +246,13 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
     `;
   });
 
-  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * 0.11)) : 0;
-  const pphAmount = invoice.include_pph ? (invoice.pph_amount || Math.round(totalSubtotal * 0.02)) : 0;
-  const grandTotal = totalSubtotal + ppnAmount - pphAmount;
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, pphAmount, grandTotal, paidAmount, remainingAmount, 'general', {
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'general', {
     tableHeaders: ['DESCRIPTION', 'QTY', 'PRICE', 'DISCOUNT', 'TOTAL']
   });
 }
@@ -268,7 +266,7 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
 
   items.forEach((item) => {
     const meta = item.meta || {};
-    const itemTotal = item.quantity * item.unit_price;
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
@@ -284,13 +282,13 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
     `;
   });
 
-  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * 0.011)) : 0;
-  const pphAmount = invoice.include_pph ? (invoice.pph_amount || Math.round(totalSubtotal * 0.02)) : 0;
-  const grandTotal = totalSubtotal + ppnAmount - pphAmount;
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, pphAmount, grandTotal, paidAmount, remainingAmount, 'a', {
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'a', {
     tableHeaders: ['Tanggal', 'Tujuan', 'No. Dokumen', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Jumlah']
   });
 }
@@ -304,7 +302,7 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
 
   items.forEach((item) => {
     const meta = item.meta || {};
-    const itemTotal = item.quantity * item.unit_price;
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
@@ -319,13 +317,13 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
     `;
   });
 
-  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * 0.011)) : 0;
-  const pphAmount = invoice.include_pph ? (invoice.pph_amount || Math.round(totalSubtotal * 0.02)) : 0;
-  const grandTotal = totalSubtotal + ppnAmount - pphAmount;
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, pphAmount, grandTotal, paidAmount, remainingAmount, 'b', {
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'b', {
     tableHeaders: ['Tanggal', 'Origin', 'Tujuan', 'Armada', 'No. Pol', 'Harga Ritase', 'Jumlah']
   });
 }
@@ -339,7 +337,7 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
 
   items.forEach((item) => {
     const meta = item.meta || {};
-    const itemTotal = item.quantity * item.unit_price;
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
@@ -354,13 +352,13 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
     `;
   });
 
-  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * 0.011)) : 0;
-  const pphAmount = invoice.include_pph ? (invoice.pph_amount || Math.round(totalSubtotal * 0.02)) : 0;
-  const grandTotal = totalSubtotal + ppnAmount - pphAmount;
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, pphAmount, grandTotal, paidAmount, remainingAmount, 'c', {
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', {
     tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No. SPK', 'Harga', 'Jumlah']
   });
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit } from 'lucide-react';
+import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -69,6 +70,7 @@ type PurchaseInvoice = {
 };
 
 export default function PurchaseInvoices() {
+  const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
@@ -1005,7 +1007,7 @@ if (!finalCompanyCode) {
         </div>
       )}
 
-      {showDetailModal && selectedInvoice && (
+           {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
             <div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail AP</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div>
@@ -1024,6 +1026,22 @@ if (!finalCompanyCode) {
               {selectedInvoice.voucher_no && <p><strong>Voucher:</strong> {selectedInvoice.voucher_no}</p>}
               <a href={selectedInvoice.attachment_url} target="_blank" className="text-blue-600">Lihat Bukti</a>
             </div>
+            {/* 🔥 DOKUMEN TERKAIT - Letakkan DI SINI (di dalam Modal Detail) */}
+            {selectedInvoice && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
+                <button
+                  onClick={() => navigate(`/documents?ref=ap&id=${selectedInvoice.id}`)}
+                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <FileText className="w-4 h-4" />
+                  Lihat dokumen untuk AP ini
+                </button>
+              </div>
+            )}
+            <div className="flex justify-end mt-6">
+              <button onClick={() => setShowDetailModal(false)} className="px-4 py-2 border border-border rounded-lg">Tutup</button>
+            </div>
           </div>
         </div>
       )}
@@ -1041,7 +1059,7 @@ if (!finalCompanyCode) {
               <input type="text" placeholder="Nama Bank" value={newVendor.bank_name} onChange={e => setNewVendor({...newVendor, bank_name: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
               <input type="text" placeholder="Nomor Rekening" value={newVendor.bank_account} onChange={e => setNewVendor({...newVendor, bank_account: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
             </div>
-            <div className="flex justify-end gap-3 mt-6">
+                                   <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowNewVendorModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
               <button onClick={handleCreateVendor} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
             </div>

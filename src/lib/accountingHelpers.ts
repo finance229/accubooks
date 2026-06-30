@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 // ============================================
-// ✅ FORMAT CURRENCY - TANPA MINUS OTOMATIS
+// FORMAT CURRENCY
 // ============================================
 export const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('id-ID', {
@@ -15,6 +15,9 @@ export const formatNumber = (amount: number) => {
   return new Intl.NumberFormat('id-ID').format(amount);
 };
 
+// ============================================
+// COMPANY SUFFIX
+// ============================================
 export const getCompanySuffix = (_companyId: number): string => {
   const suffixMap: Record<number, string> = {
     1: 'A',
@@ -24,6 +27,9 @@ export const getCompanySuffix = (_companyId: number): string => {
   return suffixMap[_companyId] || 'A';
 };
 
+// ============================================
+// VOUCHER CODE (MANUAL)
+// ============================================
 export const generateVoucherCode = async (_companyId: number, projectCode: string, date: Date): Promise<string> => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -47,6 +53,9 @@ export const generateVoucherCode = async (_companyId: number, projectCode: strin
   return `${base}/${nextNumber}`;
 };
 
+// ============================================
+// PROJECT BUDGET
+// ============================================
 export const checkProjectBudget = async (projectId: number, amount: number) => {
   const { data: project, error } = await supabase
     .from('projects')
@@ -85,6 +94,9 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
   return !error;
 };
 
+// ============================================
+// GET DEFAULT ACCOUNT
+// ============================================
 export const getDefaultAccount = async (_companyId: number, type: string) => {
   const suffix = getCompanySuffix(_companyId);
   
@@ -101,7 +113,6 @@ export const getDefaultAccount = async (_companyId: number, type: string) => {
     ppn_out: '2103-01',
     pph21: '2103-02',
     pph23: '2103-03',
-    pph23_prepaid: '1132', // PPh 23 Dibayar Dimuka
     pph25: '2103-04',
     capital: '3101',
     retained_earnings: '3102',
@@ -134,6 +145,9 @@ export const getDefaultAccount = async (_companyId: number, type: string) => {
   return data;
 };
 
+// ============================================
+// GET ACCOUNTS BY TYPE
+// ============================================
 export const getBankAccounts = async (companyId: number) => {
   try {
     const suffix = getCompanySuffix(companyId);
@@ -201,6 +215,9 @@ export const getAllAccounts = async (companyId: number) => {
   return data || [];
 };
 
+// ============================================
+// JOURNAL FUNCTIONS
+// ============================================
 async function getNextJournalNumber(companyId: number, year: number): Promise<number> {
   const prefix = `JU-${year}-`;
   const { data } = await supabase
@@ -403,6 +420,9 @@ export const createGeneralJournal = async (
   }
 };
 
+// ============================================
+// PAYMENT LOG
+// ============================================
 export const addPaymentLog = async (requestId: number, oldStatus: string, newStatus: string, notes: string) => {
   const { data: user } = await supabase.auth.getUser();
   const email = user.user?.email || 'system';
@@ -416,6 +436,9 @@ export const addPaymentLog = async (requestId: number, oldStatus: string, newSta
   });
 };
 
+// ============================================
+// CREATE CUSTOMER / VENDOR / PROJECT
+// ============================================
 export const createCustomerIfNotExist = async (
   companyId: number,
   name: string,
@@ -490,20 +513,56 @@ export const createVendorIfNotExist = async (
   return newVendor.id;
 };
 
+// ============================================
+// 🔥🔥🔥 GENERATE INVOICE NO (NEW FORMAT) 🔥🔥🔥
+// ============================================
 export const generateInvoiceNo = async (
   companyId: number,
   date: Date,
   projectCode: string | null = null
 ): Promise<string> => {
-  const { data, error } = await supabase.rpc('generate_invoice_no', {
-    p_company_id: companyId,
-    p_date: date.toISOString().split('T')[0],
-    p_project_code: projectCode,
-  });
-  if (error) throw new Error(error.message);
-  return data;
+  // Ambil kode perusahaan (ARKO, MMC, USA)
+  const { data: company } = await supabase
+    .from('companies')
+    .select('code')
+    .eq('id', companyId)
+    .single();
+  
+  const companyCode = company?.code || 'INV';
+
+  // Format tahun dan bulan (terpisah)
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+
+  // Project code (default GENERAL)
+  const projectPart = projectCode || 'GENERAL';
+
+  // Cari nomor urut terakhir
+  const pattern = `${companyCode}/INV/${year}/${month}/${projectPart}/%`;
+  const { data: lastInvoice } = await supabase
+    .from('invoices')
+    .select('invoice_number')
+    .eq('company_id', companyId)
+    .like('invoice_number', pattern)
+    .order('invoice_number', { ascending: false })
+    .limit(1);
+
+  let lastNumber = 0;
+  if (lastInvoice && lastInvoice.length > 0) {
+    const parts = lastInvoice[0].invoice_number.split('/');
+    const lastPart = parts[parts.length - 1];
+    lastNumber = parseInt(lastPart) || 0;
+  }
+
+  const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+
+  // 🔥 FORMAT: ARKO/INV/2026/06/PRJ001/001
+  return `${companyCode}/INV/${year}/${month}/${projectPart}/${nextNumber}`;
 };
 
+// ============================================
+// GENERATE VOUCHER NO (RPC - bisa dihapus jika tidak dipakai)
+// ============================================
 export const generateVoucherNo = async (
   companyId: number,
   date: Date,

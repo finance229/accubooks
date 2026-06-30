@@ -65,6 +65,17 @@ export const checkProjectBudget = async (projectId: number, amount: number) => {
   
   if (error || !project) return { sufficient: false, message: 'Proyek tidak ditemukan', remaining: 0 };
   
+  // 🔥 JIKA BUDGET = 0, ANGGAP TIDAK TERBATAS (UNLIMITED)
+  if (project.budget === 0) {
+    return {
+      sufficient: true,
+      remaining: Infinity,
+      budget: 0,
+      spent: project.spent,
+      message: '✅ Budget tidak terbatas (unlimited)'
+    };
+  }
+  
   const remaining = project.budget - project.spent;
   const sufficient = remaining >= amount;
   return {

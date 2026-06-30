@@ -13,7 +13,8 @@ import {
   addPaymentLog,
   createProjectIfNotExist,
   checkProjectBudget,
-  updateProjectSpent
+  updateProjectSpent,
+  generateVoucherNumber
 } from '../lib/accountingHelpers';
 import { uploadToGoogleDrive } from '../lib/googleDrive';
 
@@ -398,35 +399,20 @@ export default function PaymentRequests() {
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
     
-    // GENERATE VOUCHER NO
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const project = projects.find(p => p.id === verifyData.projectId);
-    const projectCode = project?.code || '';
+   // 🔥 GENERATE VOUCHER PAKE GLOBAL SEQUENCE
+const now = new Date();
+const year = now.getFullYear();
+const month = String(now.getMonth() + 1).padStart(2, '0');
+const project = projects.find(p => p.id === verifyData.projectId);
+const projectCode = project?.code || '';
 
-    let basePattern = `${companyCode}/${year}/${month}`;
-    if (projectCode) {
-      basePattern += `/${projectCode}`;
-    }
+const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
 
-    const { data: existingVouchers } = await supabase
-      .from('payment_requests')
-      .select('voucher_no')
-      .ilike('voucher_no', `${basePattern}/%`)
-      .order('voucher_no', { ascending: false })
-      .limit(1);
-
-    let lastNumber = 0;
-    if (existingVouchers && existingVouchers.length > 0) {
-      const parts = existingVouchers[0].voucher_no.split('/');
-      const lastPart = parts[parts.length - 1];
-      lastNumber = parseInt(lastPart) || 0;
-    }
-
-    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-    const voucherCode = `${basePattern}/${nextNumber}`;
-
+// 🔥 PAKE generateVoucherNumber (GLOBAL SEQUENCE)
+const voucherCode = await generateVoucherNumber(
+  currentCompany!.id,
+  basePattern
+);
     // Update project spent
     await updateProjectSpent(verifyData.projectId, request.amount);
 

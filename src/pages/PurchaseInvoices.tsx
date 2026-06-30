@@ -13,7 +13,8 @@ import {
   createProjectIfNotExist,
   getBankAccounts,
   getExpenseAccounts,
-  getLiabilityAccounts
+  getLiabilityAccounts,
+  generateVoucherNumber
 } from '../lib/accountingHelpers';
 import AgingModal from '../components/AgingModal';
 import { uploadToGoogleDrive } from '../lib/googleDrive';
@@ -513,37 +514,22 @@ if (!finalCompanyCode) {
   finalCompanyCode = data?.code || data?.name?.substring(0, 4).toUpperCase() || 'COMP';
 }
 
-    // 🔴 GENERATE VOUCHER NO (SAMA PERSIS DENGAN PREVIEW)
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const project = projects.find(p => p.id === verifyData.projectId);
-    const projectCode = project?.code || '';
+    // 🔥 GENERATE VOUCHER PAKE GLOBAL SEQUENCE
+const now = new Date();
+const year = now.getFullYear();
+const month = String(now.getMonth() + 1).padStart(2, '0');
+const project = projects.find(p => p.id === verifyData.projectId);
+const projectCode = project?.code || '';
 
-    let basePattern = `${companyCode}/${year}/${month}`;
-    if (projectCode) {
-      basePattern += `/${projectCode}`;
-    }
+const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
 
-    // Cari nomor terakhir (pakai query yang sama)
-    const { data: existingVouchers } = await supabase
-      .from('vendor_invoices')
-      .select('voucher_no')
-      .ilike('voucher_no', `${basePattern}/%`)
-      .order('voucher_no', { ascending: false })
-      .limit(1);
+// 🔥 PAKE generateVoucherNumber (GLOBAL SEQUENCE)
+const voucherNo = await generateVoucherNumber(
+  currentCompany!.id,
+  basePattern
+);
 
-    let lastNumber = 0;
-    if (existingVouchers && existingVouchers.length > 0) {
-      const parts = existingVouchers[0].voucher_no.split('/');
-      const lastPart = parts[parts.length - 1];
-      lastNumber = parseInt(lastPart) || 0;
-    }
-
-    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-    const voucherNo = `${basePattern}/${nextNumber}`;
-
-    console.log('📝 Voucher Generated:', voucherNo);
+console.log('📝 Voucher Generated:', voucherNo);
 
     // 🔴 LANJUTKAN VERIFIKASI
     const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');

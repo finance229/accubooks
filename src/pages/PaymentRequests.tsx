@@ -38,7 +38,8 @@ type PaymentRequest = {
   voucher_no: string | null;
   attachment_url: string | null;
   debit_account_id: number | null;
-  credit_account_id: number | null;
+  credit_account_id: number | null;  // 🔥 AKUN UTANG
+  payment_account_id: number | null; // 🔥 TAMBAHKAN: AKUN BANK/KAS
   ppn: number;
   pph: number;
   total_with_tax: number;
@@ -63,7 +64,6 @@ export default function PaymentRequests() {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   
-  // 🆕 STATE UNTUK COMPANY CODE DAN PREVIEW VOUCHER
   const [companyCode, setCompanyCode] = useState<string>('');
   const [voucherPreview, setVoucherPreview] = useState<string>('');
   const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
@@ -82,13 +82,15 @@ export default function PaymentRequests() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // 🔥 VERIFY DATA - TAMBAHKAN paymentAccountId
   const [verifyData, setVerifyData] = useState({
     projectId: 0,
     newProjectCode: '',
     newProjectName: '',
     newProjectBudget: 0,
     debitAccountId: 0,
-    creditAccountId: 0,
+    creditAccountId: 0,   // 🔥 UTANG
+    paymentAccountId: 0,  // 🔥 TAMBAHKAN: BANK/KAS
     ppn: 0,
     pph: 0,
     total: 0,
@@ -106,7 +108,7 @@ export default function PaymentRequests() {
   }, [currentCompany]);
 
   // ============================================
-  // 🆕 FETCH COMPANY CODE
+  // FETCH COMPANY CODE
   // ============================================
   const fetchCompanyCode = async () => {
     if (!currentCompany?.id) {
@@ -135,7 +137,7 @@ export default function PaymentRequests() {
   };
 
   // ============================================
-  // 🆕 GENERATE PREVIEW VOUCHER OTOMATIS
+  // GENERATE PREVIEW VOUCHER
   // ============================================
   const generateVoucherPreview = async () => {
     if (!currentCompany?.id || !companyCode) {
@@ -159,7 +161,6 @@ export default function PaymentRequests() {
         basePattern += `/${projectCode}`;
       }
 
-      // Cari nomor terakhir dari payment_requests
       const { data: existingVouchers } = await supabase
         .from('payment_requests')
         .select('voucher_no')
@@ -186,13 +187,15 @@ export default function PaymentRequests() {
     }
   };
 
-  // Auto-generate preview saat project berubah
   useEffect(() => {
     if (companyCode) {
       generateVoucherPreview();
     }
   }, [companyCode, verifyData.projectId, projects]);
 
+  // ============================================
+  // DATA FETCHING
+  // ============================================
   const fetchRequests = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
@@ -216,15 +219,15 @@ export default function PaymentRequests() {
   };
 
   const fetchCoa = async () => {
-  if (!currentCompany?.id) return;
-  const { data } = await supabase
-    .from('coa')
-    .select('id, code, name, type')
-    .eq('company_id', currentCompany.id)
-    .eq('is_active', true)
-    .order('code');
-  setCoaList(data || []);
-};
+    if (!currentCompany?.id) return;
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name, type')
+      .eq('company_id', currentCompany.id)
+      .eq('is_active', true)
+      .order('code');
+    setCoaList(data || []);
+  };
 
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;
@@ -238,6 +241,9 @@ export default function PaymentRequests() {
     setBankAccounts(data || []);
   };
 
+  // ============================================
+  // CREATE PROJECT
+  // ============================================
   const handleCreateProject = async () => {
     if (!newProject.code || !newProject.name) {
       alert('Kode dan nama proyek wajib diisi');
@@ -260,6 +266,9 @@ export default function PaymentRequests() {
     }
   };
 
+  // ============================================
+  // CREATE PAYMENT REQUEST
+  // ============================================
   const handleAddRequest = async () => {
     if (!newRequest.description || !newRequest.amount) {
       alert('Lengkapi deskripsi dan jumlah');
@@ -295,7 +304,7 @@ export default function PaymentRequests() {
         bank_name: newRequest.bank_name,
         bank_account_number: newRequest.bank_account_number,
         bank_account_name: newRequest.bank_account_name,
-        bukti_url: uploadResult.fileUrl,
+        attachment_url: uploadResult.fileUrl,
         status: 'draft',
       }])
       .select();
@@ -311,6 +320,9 @@ export default function PaymentRequests() {
     setUploading(false);
   };
 
+  // ============================================
+  // SUBMIT PAYMENT REQUEST
+  // ============================================
   const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('payment_requests')
@@ -322,6 +334,9 @@ export default function PaymentRequests() {
     } else alert('Gagal submit');
   };
 
+  // ============================================
+  // OPEN VERIFY MODAL
+  // ============================================
   const openVerifyModal = (request: PaymentRequest) => {
     setSelectedRequest(request);
     setVerifyData({
@@ -331,6 +346,7 @@ export default function PaymentRequests() {
       newProjectBudget: 0,
       debitAccountId: request.debit_account_id || 0,
       creditAccountId: request.credit_account_id || 0,
+      paymentAccountId: request.payment_account_id || 0, // 🔥 TAMBAHKAN
       ppn: request.ppn || 0,
       pph: request.pph || 0,
       total: request.amount,
@@ -339,6 +355,9 @@ export default function PaymentRequests() {
     setShowVerifyModal(true);
   };
 
+  // ============================================
+  // PROJECT CHANGE
+  // ============================================
   const handleProjectChange = async (projectId: number) => {
     setVerifyData({ ...verifyData, projectId });
     if (projectId > 0 && selectedRequest) {
@@ -350,6 +369,9 @@ export default function PaymentRequests() {
     } else setBudgetInfo(null);
   };
 
+  // ============================================
+  // HANDLE VERIFY
+  // ============================================
   const handleVerify = async () => {
     if (!selectedRequest) return;
     if (!verifyData.projectId) {
@@ -360,6 +382,10 @@ export default function PaymentRequests() {
       alert('Pilih akun debit dan kredit');
       return;
     }
+    if (!verifyData.paymentAccountId) {
+      alert('Pilih akun pembayaran (Bank/Kas)');
+      return;
+    }
     if (budgetInfo && !budgetInfo.sufficient) {
       alert('Budget tidak cukup. Tidak bisa verifikasi.');
       return;
@@ -368,7 +394,7 @@ export default function PaymentRequests() {
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
     
-    // 🔴 GENERATE VOUCHER NO (SAMA PERSIS DENGAN PREVIEW)
+    // GENERATE VOUCHER NO
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -380,7 +406,6 @@ export default function PaymentRequests() {
       basePattern += `/${projectCode}`;
     }
 
-    // Cari nomor terakhir dari payment_requests
     const { data: existingVouchers } = await supabase
       .from('payment_requests')
       .select('voucher_no')
@@ -419,7 +444,7 @@ export default function PaymentRequests() {
       return;
     }
 
-    // Update payment request
+    // Update payment request - 🔥 SIMPAN payment_account_id
     const { error } = await supabase
       .from('payment_requests')
       .update({
@@ -430,6 +455,7 @@ export default function PaymentRequests() {
         voucher_no: voucherCode,
         debit_account_id: verifyData.debitAccountId,
         credit_account_id: verifyData.creditAccountId,
+        payment_account_id: verifyData.paymentAccountId, // 🔥 TAMBAHKAN
         ppn: verifyData.ppn,
         pph: verifyData.pph,
         total_with_tax: totalAmount,
@@ -446,15 +472,21 @@ export default function PaymentRequests() {
     setShowVerifyModal(false);
   };
 
+  // ============================================
+  // HANDLE APPROVE - 🔥 PAKAI payment_account_id
+  // ============================================
   const handleApprove = async (id: number) => {
     const request = requests.find(r => r.id === id);
     if (!request) return;
-    if (!request.credit_account_id) {
-      alert('Akun kas/bank belum dipilih saat verifikasi');
+    
+    // 🔥 Ambil payment_account_id (akun bank/kas)
+    const bankAccountId = request.payment_account_id || request.credit_account_id;
+    if (!bankAccountId) {
+      alert('Akun pembayaran belum dipilih saat verifikasi');
       return;
     }
     
-    // Buat jurnal pembayaran
+    // 🔥 Buat jurnal pembayaran
     let journalId = null;
     try {
       journalId = await createPaymentJournal(
@@ -462,8 +494,8 @@ export default function PaymentRequests() {
         new Date().toISOString().split('T')[0],
         request.description,
         request.voucher_no || '',
-        request.credit_account_id,
-        request.credit_account_id,
+        request.credit_account_id,    // 🔥 Utang (Debit)
+        bankAccountId,                // 🔥 Bank/Kas (Kredit)
         request.total_with_tax || request.amount,
         request.project_id || undefined
       );
@@ -482,6 +514,9 @@ export default function PaymentRequests() {
     } else alert('Gagal approve');
   };
 
+  // ============================================
+  // FILTER & RENDER
+  // ============================================
   const filteredRequests = requests.filter(req => {
     const matchesSearch = req.request_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.description?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -615,7 +650,7 @@ export default function PaymentRequests() {
         </div>
       )}
 
-      {/* Modal Verifikasi */}
+      {/* Modal Verifikasi - 🔥 TAMBAHKAN DROPDOWN AKUN PEMBAYARAN */}
       {showVerifyModal && selectedRequest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8">
@@ -637,7 +672,6 @@ export default function PaymentRequests() {
                 </div>
               </div>
               
-              {/* 🆕 PREVIEW VOUCHER - OTOMATIS BERUBAH SAAT PROJECT BERUBAH */}
               <div>
                 <label className="block font-medium">Preview Voucher</label>
                 <div className="flex items-center gap-2">
@@ -660,6 +694,7 @@ export default function PaymentRequests() {
                   {coaList.filter(c => c.type === 'expense' || c.type === 'asset').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
               </div>
+
               <div>
                 <label className="block font-medium">Akun Kredit (Hutang)</label>
                 <select value={verifyData.creditAccountId} onChange={e => setVerifyData({...verifyData, creditAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
@@ -667,6 +702,17 @@ export default function PaymentRequests() {
                   {coaList.filter(c => c.type === 'liability').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
               </div>
+
+              {/* 🔥 TAMBAHKAN: AKUN PEMBAYARAN (BANK/KAS) */}
+              <div>
+                <label className="block font-medium">Akun Pembayaran (Bank/Kas) *</label>
+                <select value={verifyData.paymentAccountId} onChange={e => setVerifyData({...verifyData, paymentAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
+                  <option value={0}>-- Pilih Akun --</option>
+                  {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
+                </select>
+                <p className="text-xs text-text-muted mt-1">Akun ini akan digunakan saat pembayaran nanti (Debit Utang, Kredit Bank/Kas)</p>
+              </div>
+
               <div className="grid grid-cols-3 gap-4">
                 <div><label>PPN (Rp)</label><input type="number" value={verifyData.ppn} onChange={e => setVerifyData({...verifyData, ppn: parseInt(e.target.value) || 0, total: selectedRequest.amount + (parseInt(e.target.value) || 0) - verifyData.pph})} className="w-full px-4 py-2 border rounded-lg" /></div>
                 <div><label>PPh 23 (Rp)</label><input type="number" value={verifyData.pph} onChange={e => setVerifyData({...verifyData, pph: parseInt(e.target.value) || 0, total: selectedRequest.amount + verifyData.ppn - (parseInt(e.target.value) || 0)})} className="w-full px-4 py-2 border rounded-lg" /></div>
@@ -682,7 +728,8 @@ export default function PaymentRequests() {
         </div>
       )}
 
-         {showDetailModal && selectedRequest && (
+      {/* Modal Detail */}
+      {showDetailModal && selectedRequest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
             <div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail Request</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div>
@@ -715,6 +762,7 @@ export default function PaymentRequests() {
           </div>
         </div>
       )}
+
       {/* Modal Buat Proyek Baru */}
       {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

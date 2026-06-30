@@ -284,17 +284,35 @@ export default function PurchaseInvoices() {
   };
 
   const fetchCoa = async () => {
-    if (!currentCompany?.id) return;
-    const expenseData = await getExpenseAccounts(currentCompany.id);
-    const liabilityData = await getLiabilityAccounts(currentCompany.id);
-    setCoaList([...expenseData, ...liabilityData]);
-  };
+  if (!currentCompany?.id) return;
+  
+  // 🔥 AMBIL SEMUA AKUN (TANPA FILTER YANG TERLALU STRICT)
+  const { data } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', currentCompany.id)
+    .eq('is_active', true)
+    .order('code');
+  
+  console.log('📊 COA loaded:', data?.length);
+  setCoaList(data || []);
+};
 
   const fetchBankAccounts = async () => {
-    if (!currentCompany?.id) return;
-    const banks = await getBankAccounts(currentCompany.id);
-    setBankAccounts(banks);
-  };
+  if (!currentCompany?.id) return;
+  
+  // 🔥 AMBIL SEMUA AKUN TIPE ASET (TERMASUK BANK & KAS)
+  const { data } = await supabase
+    .from('coa')
+    .select('id, code, name')
+    .eq('company_id', currentCompany.id)
+    .eq('is_active', true)
+    .eq('type', 'asset')
+    .order('code');
+  
+  console.log('🏦 Bank Accounts (all assets):', data?.length);
+  setBankAccounts(data || []);
+};
 
   const filteredVendors = vendors.filter(v =>
     v.name.toLowerCase().includes(vendorSearch.toLowerCase())

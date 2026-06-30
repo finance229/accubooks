@@ -584,7 +584,7 @@ export default function Invoices() {
       });
       
       // Debit PPh 23 Masukan (sebagai aset/potongan)
-      const pphAcc = await getDefaultAccount(currentCompany!.id, 'pph23');
+      const pphAcc = await getDefaultAccount(currentCompany!.id, 'pph23_prepaid');
       if (pphAcc) {
         entries.push({
           account_id: pphAcc.id,

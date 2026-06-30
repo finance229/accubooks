@@ -233,20 +233,18 @@ export default function PaymentRequests() {
   const fetchBankAccounts = async () => {
   if (!currentCompany?.id) return;
   
-  // 🔥 AMBIL SEMUA AKUN BANK & KAS
+  // 🔥 AMBIL AKUN YANG NAMANYA ADA "BANK" ATAU "KAS"
   const { data } = await supabase
     .from('coa')
     .select('id, code, name')
     .eq('company_id', currentCompany.id)
     .eq('is_active', true)
-    .in('type', ['asset'])
-    .ilike('name', '%bank%')
-    .or('name.ilike.%kas%');
+    .or('name.ilike.%bank%.or.name.ilike.%kas%')
+    .order('code');
   
   console.log('🏦 Bank Accounts found:', data?.length);
   setBankAccounts(data || []);
-};
-  // ============================================
+};  // ============================================
   // CREATE PROJECT
   // ============================================
   const handleCreateProject = async () => {

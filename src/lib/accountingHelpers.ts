@@ -101,6 +101,7 @@ export const getDefaultAccount = async (_companyId: number, type: string) => {
     ppn_out: '2103-01',
     pph21: '2103-02',
     pph23: '2103-03',
+    pph23_prepaid: '1132', // PPh 23 Dibayar Dimuka
     pph25: '2103-04',
     capital: '3101',
     retained_earnings: '3102',

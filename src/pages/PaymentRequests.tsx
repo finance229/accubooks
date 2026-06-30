@@ -388,10 +388,11 @@ export default function PaymentRequests() {
       alert('Pilih akun pembayaran (Bank/Kas)');
       return;
     }
-    if (budgetInfo && !budgetInfo.sufficient) {
-      alert('Budget tidak cukup. Tidak bisa verifikasi.');
-      return;
-    }
+   // 🔥 SKIP BUDGET CHECK KALAU BUDGET = 0 (UNLIMITED)
+if (budgetInfo && !budgetInfo.sufficient && budgetInfo.budget !== 0) {
+  alert('Budget tidak cukup. Tidak bisa verifikasi.');
+  return;
+}
 
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;

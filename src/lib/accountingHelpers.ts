@@ -563,18 +563,41 @@ export const generateInvoiceNo = async (
 // ============================================
 // GENERATE VOUCHER NO (RPC - bisa dihapus jika tidak dipakai)
 // ============================================
-export const generateVoucherNo = async (
+export const generateVoucherNumber = async (
   companyId: number,
-  date: Date,
-  projectCode: string | null = null
+  prefix: string // contoh: 'PT A/2026/06/BNPB'
 ): Promise<string> => {
-  const { data, error } = await supabase.rpc('generate_voucher_no', {
-    p_company_id: companyId,
-    p_date: date.toISOString().split('T')[0],
-    p_project_code: projectCode,
-  });
-  if (error) throw new Error(error.message);
-  return data;
+  // Cari atau buat sequence
+  let { data: seq } = await supabase
+    .from('voucher_sequences')
+    .select('last_number')
+    .eq('company_id', companyId)
+    .eq('prefix', prefix)
+    .single();
+
+  if (!seq) {
+    // Buat baru
+    const { data: newSeq } = await supabase
+      .from('voucher_sequences')
+      .insert({ company_id: companyId, prefix, last_number: 0 })
+      .select()
+      .single();
+    seq = newSeq;
+  }
+
+  // Increment
+  const nextNumber = (seq.last_number || 0) + 1;
+
+  // Update
+  await supabase
+    .from('voucher_sequences')
+    .update({ last_number: nextNumber, updated_at: new Date().toISOString() })
+    .eq('company_id', companyId)
+    .eq('prefix', prefix);
+
+  // Format 3 digit
+  const formatted = String(nextNumber).padStart(3, '0');
+  return `${prefix}/${formatted}`;
 };
 
 export const previewVoucherNo = async (

@@ -41,7 +41,6 @@ const menuGroups: MenuGroup[] = [
     name: 'Akuntansi & Keuangan',
     icon: Database,
     items: [
-      { name: 'Transaksi', to: '/transactions', icon: Receipt },
       { name: 'Jurnal Umum', to: '/journal-entries', icon: BookOpen },
       { name: 'Buku Besar', to: '/ledger', icon: Book },
       { name: 'Chart of Accounts', to: '/chart-of-accounts', icon: BookMarked },

@@ -20,12 +20,11 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Vendors from './pages/Vendors';
 import PurchaseInvoices from './pages/PurchaseInvoices';
-// TAMBAHKAN IMPORT INI
 import IncomeStatement from './pages/IncomeStatement';
 import BalanceSheet from './pages/BalanceSheet';
 import RecurringTransactions from './pages/RecurringTransactions';
 import ReportsGeneral from './pages/ReportsGeneral';
-import Payroll from './pages/Payroll';
+import Payroll from './pages/Payroll';  // ✅ IMPORT SUDAH ADA
 
 function App() {
   return (
@@ -56,11 +55,11 @@ function App() {
               <Route path="projects" element={<Projects />} />
               <Route path="vendors" element={<Vendors />} />
               <Route path="purchase-invoices" element={<PurchaseInvoices />} />
-              {/* TAMBAHKAN ROUTE INI */}
               <Route path="income-statement" element={<IncomeStatement />} />
               <Route path="balance-sheet" element={<BalanceSheet />} />
               <Route path="recurring-transactions" element={<RecurringTransactions />} />
               <Route path="reports-general" element={<ReportsGeneral />} />
+              <Route path="payroll" element={<Payroll />} />  {/* 🔥 TAMBAHKAN INI */}
             </Route>
           </Routes>
         </CompanyProvider>

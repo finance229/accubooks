@@ -294,10 +294,10 @@ export default function PaymentRequests() {
 
   // 2. Generate nomor request dari DATABASE (AMAN)
   const year = new Date().getFullYear();
-  const { data: requestNumber, error: seqError } = await supabase.rpc(
-    'get_next_request_number',
-    { p_company_id: currentCompany!.id, p_year: year }
-  );
+ const { data: requestNumber, error: seqError } = await supabase.rpc(
+  'generate_pr_number',   // <-- nama fungsi baru
+  { p_company_id: currentCompany!.id, p_year: year }
+);
 
   if (seqError || !requestNumber) {
     alert('Gagal generate nomor request: ' + seqError?.message);

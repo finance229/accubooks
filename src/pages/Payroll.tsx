@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  Plus, Search, Eye, Edit2, Trash2, Send, CheckCircle, XCircle, Loader2, 
-  Clock, FileText, Copy, Save, CheckSquare, X
+  Plus, Search, Eye, Edit2, Trash2, Send, Loader2, 
+  Clock, Copy, Save, CheckSquare, X
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +14,9 @@ import {
   getDefaultAccount,
 } from '../lib/accountingHelpers';
 
+// ============================================================
+// TYPES
+// ============================================================
 type PayrollRow = {
   id?: number;
   employee_name: string;
@@ -22,7 +25,9 @@ type PayrollRow = {
   bpjs_kesehatan: number;
   bpjs_tk: number;
   tunjangan_lainnya: number;
-  pph21: number;
+  tunjangan_pph21: number;    // 🔥 BARU
+  potongan_pph21: number;     // 🔥 BARU
+  pph21: number;              // 🔥 TETAP ADA SEBAGAI INFO
   gaji_bersih: number;
   bank_account_id: number;
   status: 'draft' | 'posted';
@@ -48,6 +53,9 @@ type Coa = {
   type: string;
 };
 
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
 export default function Payroll() {
   const navigate = useNavigate();
   const { currentCompany } = useCompany();
@@ -57,7 +65,6 @@ export default function Payroll() {
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [overtimes, setOvertimes] = useState<Overtime[]>([]);
   const [bankAccounts, setBankAccounts] = useState<Coa[]>([]);
-  const [coaList, setCoaList] = useState<Coa[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [postingAll, setPostingAll] = useState(false);
@@ -69,9 +76,7 @@ export default function Payroll() {
   const [selectedPayrollName, setSelectedPayrollName] = useState('');
   const [overtimeForm, setOvertimeForm] = useState({ amount: 0, description: '', bank_account_id: 0 });
   const [editingOvertimeId, setEditingOvertimeId] = useState<number | null>(null);
-  const [copyPrevious, setCopyPrevious] = useState(false);
   const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
   
   const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -79,7 +84,6 @@ export default function Payroll() {
   useEffect(() => {
     if (currentCompany?.id) {
       fetchBankAccounts();
-      fetchCoa();
       if (period) fetchPayrolls();
     }
   }, [currentCompany]);
@@ -89,17 +93,6 @@ export default function Payroll() {
       fetchPayrolls();
     }
   }, [period]);
-
-  const fetchCoa = async () => {
-    if (!currentCompany?.id) return;
-    const { data } = await supabase
-      .from('coa')
-      .select('id, code, name, type')
-      .eq('company_id', currentCompany.id)
-      .eq('is_active', true)
-      .order('code');
-    setCoaList(data || []);
-  };
 
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;
@@ -117,7 +110,6 @@ export default function Payroll() {
   const fetchPayrolls = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
-    
     const { data, error } = await supabase
       .from('payroll')
       .select('*')
@@ -133,7 +125,6 @@ export default function Payroll() {
     
     if (data && data.length > 0) {
       setRows(data);
-      // Ambil overtimes
       const ids = data.map(r => r.id);
       const { data: otData } = await supabase
         .from('payroll_overtime')
@@ -153,7 +144,6 @@ export default function Payroll() {
     if (!confirm(`Copy data payroll dari bulan sebelumnya ke ${period}?`)) return;
     
     setIsLoadingPrevious(true);
-    
     const prevDate = new Date(period);
     prevDate.setMonth(prevDate.getMonth() - 1);
     const prevPeriod = prevDate.toISOString().slice(0, 7);
@@ -179,6 +169,8 @@ export default function Payroll() {
         bpjs_kesehatan: r.bpjs_kesehatan,
         bpjs_tk: r.bpjs_tk,
         tunjangan_lainnya: r.tunjangan_lainnya,
+        tunjangan_pph21: r.tunjangan_pph21 || 0,
+        potongan_pph21: r.potongan_pph21 || 0,
         pph21: r.pph21 || 0,
         gaji_bersih: r.gaji_bersih,
         bank_account_id: r.bank_account_id,
@@ -201,7 +193,11 @@ export default function Payroll() {
     const bpjsKes = Math.round(gajiPokok * 0.05);
     const bpjsTk = Math.round(gajiPokok * 0.0924);
     const tunjangan = Number(row.tunjangan_lainnya) || 0;
-    const gajiBersih = gajiPokok + tunjangan;
+    const tunjanganPph21 = Number(row.tunjangan_pph21) || 0;
+    const potonganPph21 = Number(row.potongan_pph21) || 0;
+    
+    // 🔥 FORMULA BARU
+    const gajiBersih = gajiPokok + tunjangan + tunjanganPph21 - potonganPph21;
     
     return {
       ...row,
@@ -211,15 +207,33 @@ export default function Payroll() {
     };
   };
 
-  // ============ UPDATE ROW & AUTO-SAVE ============
+  // ============ UPDATE ROW & AUTO-SYNC ============
   const updateRow = (index: number, field: keyof PayrollRow, value: any) => {
     const newRows = [...rows];
     let updated = { ...newRows[index], [field]: value };
-    // Recalculate
+    
+    // 🔥 Jika user mengubah PPh 21, otomatis isi tunjangan_pph21 & potongan_pph21
+    if (field === 'pph21') {
+      const pph = Number(value) || 0;
+      updated.tunjangan_pph21 = pph;
+      updated.potongan_pph21 = pph;
+    }
+    // Jika user mengubah tunjangan_pph21, sinkronkan ke potongan_pph21 dan pph21
+    if (field === 'tunjangan_pph21') {
+      const val = Number(value) || 0;
+      updated.potongan_pph21 = val;
+      updated.pph21 = val;
+    }
+    if (field === 'potongan_pph21') {
+      const val = Number(value) || 0;
+      updated.tunjangan_pph21 = val;
+      updated.pph21 = val;
+    }
+    
+    // Re-calculate semua komponen
     updated = calculateRow(updated);
     newRows[index] = updated;
     setRows(newRows);
-    // Trigger auto-save
     autoSave();
   };
 
@@ -231,6 +245,8 @@ export default function Payroll() {
       bpjs_kesehatan: 0,
       bpjs_tk: 0,
       tunjangan_lainnya: 0,
+      tunjangan_pph21: 0,
+      potongan_pph21: 0,
       pph21: 0,
       gaji_bersih: 0,
       bank_account_id: 0,
@@ -257,7 +273,6 @@ export default function Payroll() {
     
     if (!error) {
       setRows(rows.filter((_, i) => i !== index));
-      // Hapus juga overtimes terkait
       setOvertimes(overtimes.filter(ot => ot.payroll_id !== row.id));
     } else {
       alert('Gagal menghapus: ' + error.message);
@@ -266,24 +281,16 @@ export default function Payroll() {
 
   // ============ AUTO SAVE ============
   const autoSave = () => {
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current);
-    }
-    autoSaveTimer.current = setTimeout(() => {
-      saveAllRows();
-    }, 1500);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(saveAllRows, 1500);
   };
 
   const saveAllRows = async () => {
-    if (!currentCompany?.id) return;
-    if (rows.length === 0) return;
-    if (saving) return;
-    
+    if (!currentCompany?.id || rows.length === 0 || saving) return;
     setSaving(true);
     try {
       for (const row of rows) {
         if (!row.employee_name.trim()) continue;
-        
         const dataToSave = {
           company_id: currentCompany.id,
           employee_name: row.employee_name.trim(),
@@ -292,26 +299,19 @@ export default function Payroll() {
           bpjs_kesehatan: row.bpjs_kesehatan,
           bpjs_tk: row.bpjs_tk,
           tunjangan_lainnya: row.tunjangan_lainnya,
-          pph21: row.pph21 || 0,
+          tunjangan_pph21: row.tunjangan_pph21,
+          potongan_pph21: row.potongan_pph21,
+          pph21: row.pph21,
           gaji_bersih: row.gaji_bersih,
           bank_account_id: row.bank_account_id,
           status: 'draft',
           created_by: user?.email,
         };
-
         if (row.id) {
-          await supabase
-            .from('payroll')
-            .update(dataToSave)
-            .eq('id', row.id);
+          await supabase.from('payroll').update(dataToSave).eq('id', row.id);
         } else {
-          const { data } = await supabase
-            .from('payroll')
-            .insert([dataToSave])
-            .select();
-          if (data && data[0]) {
-            row.id = data[0].id;
-          }
+          const { data } = await supabase.from('payroll').insert([dataToSave]).select();
+          if (data && data[0]) row.id = data[0].id;
         }
       }
     } catch (error) {
@@ -405,7 +405,6 @@ export default function Payroll() {
       const ot = overtimes.find(o => o.id === id);
       if (!ot) return;
 
-      // Cari akun beban survei lokasi (atau beban lainnya)
       const expenseAcc = await getDefaultAccount(currentCompany.id, 'expense');
       const bankAcc = bankAccounts.find(b => b.id === ot.bank_account_id);
 
@@ -482,44 +481,53 @@ export default function Payroll() {
     let masterJournalId: number | null = null;
 
     try {
-      // === 1. Buat Jurnal Gabungan (Master) ===
+      // ==========================================================
+      // 1. BUAT JURNAL GABUNGAN (MASTER)
+      // ==========================================================
       const masterEntries: any[] = [];
-      let masterDescription = `Payroll ${period} (Gabungan)`;
-
-      // Kumpulkan semua entries dari semua payroll
+      
       for (const row of draftRows) {
-        // Cari akun-akun
-        const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
-        const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
-        const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
-        const bebanBpjsTk = await getDefaultAccount(currentCompany.id, 'expense');
-        const bebanPph21 = await getDefaultAccount(currentCompany.id, 'expense');
-        const utangBpjsKes = await getDefaultAccount(currentCompany.id, 'liability');
-        const utangBpjsTk = await getDefaultAccount(currentCompany.id, 'liability');
-        const utangPph21 = await getDefaultAccount(currentCompany.id, 'liability');
         const bank = bankAccounts.find(b => b.id === row.bank_account_id);
-
         if (!bank) {
-          alert(`Bank tidak ditemukan untuk ${row.employee_name}`);
           failCount++;
           continue;
         }
 
-        // Tambahkan entries ke master
+        // Ambil akun (pakai getDefaultAccount)
+        const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanBpjsTk = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanTunjanganPph21 = await getDefaultAccount(currentCompany.id, 'expense');
+        const utangBpjsKes = await getDefaultAccount(currentCompany.id, 'liability');
+        const utangBpjsTk = await getDefaultAccount(currentCompany.id, 'liability');
+        const utangPph21 = await getDefaultAccount(currentCompany.id, 'liability');
+
         // Debit
-        masterEntries.push({
-          account_id: bebanGajiPokok?.id || 0,
-          account_code: bebanGajiPokok?.code || '',
-          account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
-          debit: row.gaji_pokok,
-          credit: 0,
-        });
+        if (row.gaji_pokok > 0) {
+          masterEntries.push({
+            account_id: bebanGajiPokok?.id || 0,
+            account_code: bebanGajiPokok?.code || '',
+            account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
+            debit: row.gaji_pokok,
+            credit: 0,
+          });
+        }
         if (row.tunjangan_lainnya > 0) {
           masterEntries.push({
             account_id: bebanTunjangan?.id || 0,
             account_code: bebanTunjangan?.code || '',
             account_name: bebanTunjangan?.name || 'Beban Tunjangan',
             debit: row.tunjangan_lainnya,
+            credit: 0,
+          });
+        }
+        if (row.tunjangan_pph21 > 0) {
+          masterEntries.push({
+            account_id: bebanTunjanganPph21?.id || 0,
+            account_code: bebanTunjanganPph21?.code || '',
+            account_name: bebanTunjanganPph21?.name || 'Beban Tunjangan PPh 21',
+            debit: row.tunjangan_pph21,
             credit: 0,
           });
         }
@@ -538,15 +546,6 @@ export default function Payroll() {
             account_code: bebanBpjsTk?.code || '',
             account_name: bebanBpjsTk?.name || 'Beban BPJS TK',
             debit: row.bpjs_tk,
-            credit: 0,
-          });
-        }
-        if (row.pph21 > 0) {
-          masterEntries.push({
-            account_id: bebanPph21?.id || 0,
-            account_code: bebanPph21?.code || '',
-            account_name: bebanPph21?.name || 'Beban PPh 21',
-            debit: row.pph21,
             credit: 0,
           });
         }
@@ -577,49 +576,47 @@ export default function Payroll() {
             credit: row.bpjs_tk,
           });
         }
-        if (row.pph21 > 0 && utangPph21) {
+        if (row.potongan_pph21 > 0 && utangPph21) {
           masterEntries.push({
             account_id: utangPph21.id,
             account_code: utangPph21.code,
             account_name: utangPph21.name,
             debit: 0,
-            credit: row.pph21,
+            credit: row.potongan_pph21,
           });
         }
       }
 
-      // Buat master journal pake createGeneralJournal
-if (masterEntries.length > 0) {
-  const masterJournalIdResult = await createGeneralJournal(
-    currentCompany.id,
-    new Date().toISOString().split('T')[0],
-    masterDescription,
-    `PAY-MASTER-${Date.now()}`,
-    'PAYROLL_MASTER',
-    0,
-    masterEntries
-  );
+      // Buat master journal
+      if (masterEntries.length > 0) {
+        const masterJournalIdResult = await createGeneralJournal(
+          currentCompany.id,
+          new Date().toISOString().split('T')[0],
+          `Payroll ${period} (Gabungan)`,
+          `PAY-MASTER-${Date.now()}`,
+          'PAYROLL_MASTER',
+          0,
+          masterEntries
+        );
+        if (!masterJournalIdResult) {
+          throw new Error('Gagal membuat master journal');
+        }
+        masterJournalId = masterJournalIdResult;
+      }
 
-  if (!masterJournalIdResult) {
-    throw new Error('Gagal membuat master journal');
-  }
-  masterJournalId = masterJournalIdResult;
-}
-
-      // === 2. Buat Jurnal Per Karyawan ===
+      // ==========================================================
+      // 2. BUAT JURNAL PER KARYAWAN
+      // ==========================================================
       for (const row of draftRows) {
         try {
           const bank = bankAccounts.find(b => b.id === row.bank_account_id);
-          if (!bank) {
-            failCount++;
-            continue;
-          }
+          if (!bank) { failCount++; continue; }
 
           const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
           const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
           const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
           const bebanBpjsTk = await getDefaultAccount(currentCompany.id, 'expense');
-          const bebanPph21 = await getDefaultAccount(currentCompany.id, 'expense');
+          const bebanTunjanganPph21 = await getDefaultAccount(currentCompany.id, 'expense');
           const utangBpjsKes = await getDefaultAccount(currentCompany.id, 'liability');
           const utangBpjsTk = await getDefaultAccount(currentCompany.id, 'liability');
           const utangPph21 = await getDefaultAccount(currentCompany.id, 'liability');
@@ -627,19 +624,30 @@ if (masterEntries.length > 0) {
           const entries: any[] = [];
 
           // Debit
-          entries.push({
-            account_id: bebanGajiPokok?.id || 0,
-            account_code: bebanGajiPokok?.code || '',
-            account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
-            debit: row.gaji_pokok,
-            credit: 0,
-          });
+          if (row.gaji_pokok > 0) {
+            entries.push({
+              account_id: bebanGajiPokok?.id || 0,
+              account_code: bebanGajiPokok?.code || '',
+              account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
+              debit: row.gaji_pokok,
+              credit: 0,
+            });
+          }
           if (row.tunjangan_lainnya > 0) {
             entries.push({
               account_id: bebanTunjangan?.id || 0,
               account_code: bebanTunjangan?.code || '',
               account_name: bebanTunjangan?.name || 'Beban Tunjangan',
               debit: row.tunjangan_lainnya,
+              credit: 0,
+            });
+          }
+          if (row.tunjangan_pph21 > 0) {
+            entries.push({
+              account_id: bebanTunjanganPph21?.id || 0,
+              account_code: bebanTunjanganPph21?.code || '',
+              account_name: bebanTunjanganPph21?.name || 'Beban Tunjangan PPh 21',
+              debit: row.tunjangan_pph21,
               credit: 0,
             });
           }
@@ -658,15 +666,6 @@ if (masterEntries.length > 0) {
               account_code: bebanBpjsTk?.code || '',
               account_name: bebanBpjsTk?.name || 'Beban BPJS TK',
               debit: row.bpjs_tk,
-              credit: 0,
-            });
-          }
-          if (row.pph21 > 0) {
-            entries.push({
-              account_id: bebanPph21?.id || 0,
-              account_code: bebanPph21?.code || '',
-              account_name: bebanPph21?.name || 'Beban PPh 21',
-              debit: row.pph21,
               credit: 0,
             });
           }
@@ -697,13 +696,13 @@ if (masterEntries.length > 0) {
               credit: row.bpjs_tk,
             });
           }
-          if (row.pph21 > 0 && utangPph21) {
+          if (row.potongan_pph21 > 0 && utangPph21) {
             entries.push({
               account_id: utangPph21.id,
               account_code: utangPph21.code,
               account_name: utangPph21.name,
               debit: 0,
-              credit: row.pph21,
+              credit: row.potongan_pph21,
             });
           }
 
@@ -722,7 +721,6 @@ if (masterEntries.length > 0) {
             continue;
           }
 
-          // Update row
           await supabase
             .from('payroll')
             .update({
@@ -740,7 +738,6 @@ if (masterEntries.length > 0) {
         }
       }
 
-      // Refresh data
       await fetchPayrolls();
       alert(`✅ ${successCount} payroll berhasil diposting\n❌ ${failCount} gagal`);
     } catch (err: any) {
@@ -843,7 +840,7 @@ if (masterEntries.length > 0) {
         </div>
       </div>
 
-      {/* Total */}
+      {/* Total Gaji */}
       <div className="bg-surface rounded-xl border border-border p-4">
         <p className="text-sm text-text-muted">Total Gaji Bersih Periode Ini</p>
         <p className="text-2xl font-bold text-accent">{formatCurrency(totalGaji)}</p>
@@ -863,6 +860,8 @@ if (masterEntries.length > 0) {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">BPJS Kes</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">BPJS TK</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Tunjangan</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Tunj. PPh 21</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Pot. PPh 21</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">PPh 21</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Gaji Bersih</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Bank</th>
@@ -879,7 +878,7 @@ if (masterEntries.length > 0) {
                         value={row.employee_name}
                         onChange={(e) => updateRow(idx, 'employee_name', e.target.value)}
                         className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent"
-                        placeholder="Nama karyawan"
+                        placeholder="Nama"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -901,6 +900,22 @@ if (masterEntries.length > 0) {
                         type="number"
                         value={row.tunjangan_lainnya}
                         onChange={(e) => updateRow(idx, 'tunjangan_lainnya', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.tunjangan_pph21}
+                        onChange={(e) => updateRow(idx, 'tunjangan_pph21', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.potongan_pph21}
+                        onChange={(e) => updateRow(idx, 'potongan_pph21', Number(e.target.value) || 0)}
                         className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
                       />
                     </td>
@@ -969,7 +984,7 @@ if (masterEntries.length > 0) {
                 ))}
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="text-center py-8 text-text-muted">
+                    <td colSpan={12} className="text-center py-8 text-text-muted">
                       Belum ada data payroll untuk periode ini.
                     </td>
                   </tr>

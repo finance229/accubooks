@@ -25,6 +25,7 @@ import IncomeStatement from './pages/IncomeStatement';
 import BalanceSheet from './pages/BalanceSheet';
 import RecurringTransactions from './pages/RecurringTransactions';
 import ReportsGeneral from './pages/ReportsGeneral';
+import Payroll from './pages/Payroll';
 
 function App() {
   return (

@@ -19,8 +19,8 @@ type PayrollRow = {
   employee_name: string;
   period: string;
   gaji_pokok: number;
-  bpjs_kesehatan: number;   // manual input
-  bpjs_tk: number;          // manual input
+  bpjs_kesehatan: number;
+  bpjs_tk: number;
   tunjangan_lainnya: number;
   tunjangan_pph21: number;
   potongan_pph21: number;
@@ -87,7 +87,6 @@ export default function Payroll() {
     }
   }, [period]);
 
-  // 🔥 QUERY BANK YANG PASTI MUNCUL
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;
     const { data } = await supabase
@@ -176,7 +175,6 @@ export default function Payroll() {
   };
 
   // ===================== CALCULATE & UPDATE =====================
-  // 🔥 BPJS TIDAK DI-CALCULATE OTOMATIS (MANUAL)
   const calculateRow = (row: PayrollRow): PayrollRow => {
     const gajiPokok = Number(row.gaji_pokok) || 0;
     const tunjangan = Number(row.tunjangan_lainnya) || 0;
@@ -186,7 +184,6 @@ export default function Payroll() {
     return {
       ...row,
       gaji_bersih: gajiBersih,
-      // bpjs_kesehatan dan bpjs_tk dibiarkan sesuai input user
     };
   };
 
@@ -194,7 +191,6 @@ export default function Payroll() {
     const newRows = [...rows];
     let updated = { ...newRows[index], [field]: value };
 
-    // Auto-sync PPh 21 ↔ Tunj. PPh 21 ↔ Pot. PPh 21
     if (field === 'pph21') {
       const pph = Number(value) || 0;
       updated.tunjangan_pph21 = pph;
@@ -320,8 +316,9 @@ export default function Payroll() {
 
   const saveOvertime = async () => {
     if (!currentCompany?.id || !selectedPayrollId) return;
-    if (!overtimeForm.description || overtimeForm.amount <= 0 || !overtimeForm.bank_account_id) {
-      alert('Lengkapi semua field lemburan');
+    // 🔥 PERBAIKAN: bank_account_id harus > 0
+    if (!overtimeForm.description || overtimeForm.amount <= 0 || overtimeForm.bank_account_id <= 0) {
+      alert('Lengkapi semua field lemburan (Deskripsi, Jumlah, dan Bank)');
       return;
     }
     const dataToSave = {
@@ -525,6 +522,13 @@ export default function Payroll() {
             credit: row.potongan_pph21,
           });
         }
+      }
+
+      // 🔥 VALIDASI MASTER ENTRIES
+      const totalMasterDebit = masterEntries.reduce((sum, e) => sum + e.debit, 0);
+      const totalMasterCredit = masterEntries.reduce((sum, e) => sum + e.credit, 0);
+      if (totalMasterDebit !== totalMasterCredit) {
+        throw new Error(`Total Debit (${totalMasterDebit}) != Total Kredit (${totalMasterCredit})`);
       }
 
       if (masterEntries.length > 0) {

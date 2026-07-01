@@ -335,18 +335,32 @@ export default function Payroll() {
   }, [rows]);
 
   const saveOvertime = useCallback(async () => {
-    if (!currentCompany?.id || !selectedPayrollId) return;
-    if (!overtimeForm.description || overtimeForm.amount <= 0 || overtimeForm.bank_account_id <= 0) {
-      alert('Lengkapi semua field lemburan (Deskripsi, Jumlah, dan Bank)');
+    // Validasi: pastikan semua field terisi
+    if (!selectedPayrollId) {
+      alert('Data payroll tidak valid');
       return;
     }
-    
+    if (!overtimeForm.description.trim()) {
+      alert('Deskripsi harus diisi');
+      return;
+    }
+    if (overtimeForm.amount <= 0) {
+      alert('Jumlah harus lebih dari 0');
+      return;
+    }
+    if (overtimeForm.bank_account_id <= 0) {
+      alert('Pilih akun bank / kas');
+      return;
+    }
+
+    if (!currentCompany?.id) return;
+
     try {
       const dataToSave = {
         payroll_id: selectedPayrollId,
         company_id: currentCompany.id,
         amount: overtimeForm.amount,
-        description: overtimeForm.description,
+        description: overtimeForm.description.trim(),
         bank_account_id: overtimeForm.bank_account_id,
         status: 'draft' as const,
         created_by: user?.email,
@@ -358,6 +372,7 @@ export default function Payroll() {
           setOvertimes(prev => prev.map(ot => 
             ot.id === editingOvertimeId ? { ...ot, ...dataToSave } : ot
           ));
+          alert('Lemburan berhasil diupdate');
         } else {
           alert('Gagal update: ' + error.message);
           return;
@@ -366,6 +381,7 @@ export default function Payroll() {
         const { data, error } = await supabase.from('payroll_overtime').insert([dataToSave]).select();
         if (!error && data) {
           setOvertimes(prev => [...prev, data[0]]);
+          alert('Lemburan berhasil ditambahkan');
         } else {
           alert('Gagal simpan: ' + error.message);
           return;
@@ -466,7 +482,7 @@ export default function Payroll() {
     }
   }, [currentCompany?.id, overtimes, bankAccounts, user?.email]);
 
-  // ===================== POST ALL (FIXED) =====================
+  // ===================== POST ALL (ONLY MASTER JOURNAL) =====================
   const postAll = useCallback(async () => {
     const draftRows = rows.filter(r => r.status === 'draft' && r.employee_name.trim());
     if (draftRows.length === 0) {
@@ -474,30 +490,33 @@ export default function Payroll() {
       return;
     }
 
-    if (!confirm(`Posting ${draftRows.length} payroll?`)) return;
+    if (!confirm(`Posting ${draftRows.length} payroll sebagai satu jurnal gabungan?`)) return;
     if (!currentCompany?.id) return;
     setPostingAll(true);
     let successCount = 0, failCount = 0;
     let masterJournalId: number | null = null;
 
     try {
-      // ========== GET ALL ACCOUNTS ONCE ==========
+      // ========== GET ALL ACCOUNTS WITH SPECIFIC CODES ==========
       const defaultAccounts = {
-        bebanGajiPokok: await getDefaultAccount(currentCompany.id, 'expense'),
-        bebanTunjangan: await getDefaultAccount(currentCompany.id, 'expense'),
-        bebanBpjsKes: await getDefaultAccount(currentCompany.id, 'expense'),
-        bebanBpjsTk: await getDefaultAccount(currentCompany.id, 'expense'),
-        bebanTunjanganPph21: await getDefaultAccount(currentCompany.id, 'expense'),
-        utangBpjsKes: await getDefaultAccount(currentCompany.id, 'liability'),
-        utangBpjsTk: await getDefaultAccount(currentCompany.id, 'liability'),
-        utangPph21: await getDefaultAccount(currentCompany.id, 'liability'),
+        bebanGajiPokok: await getDefaultAccount(currentCompany.id, 'expense_salary'),
+        bebanTunjangan: await getDefaultAccount(currentCompany.id, 'expense_tunjangan'),
+        bebanBpjsKes: await getDefaultAccount(currentCompany.id, 'expense_bpjs_kes'),
+        bebanBpjsTk: await getDefaultAccount(currentCompany.id, 'expense_bpjs_tk'),
+        bebanTunjanganPph21: await getDefaultAccount(currentCompany.id, 'expense_tunjangan_pph21'),
+        utangBpjsKes: await getDefaultAccount(currentCompany.id, 'liability_bpjs_kes'),
+        utangBpjsTk: await getDefaultAccount(currentCompany.id, 'liability_bpjs_tk'),
+        utangPph21: await getDefaultAccount(currentCompany.id, 'liability_pph21'),
       };
 
-      // ========== 1. JURNAL GABUNGAN (MASTER) ==========
+      // ========== BUILD MASTER ENTRIES ==========
       const masterEntries: any[] = [];
       for (const row of draftRows) {
         const bank = bankAccounts.find(b => b.id === row.bank_account_id);
-        if (!bank) { failCount++; continue; }
+        if (!bank) { 
+          failCount++; 
+          continue; 
+        }
 
         // Debit
         if (row.gaji_pokok > 0) {
@@ -591,153 +610,45 @@ export default function Payroll() {
         throw new Error(`Total Debit (${totalMasterDebit}) != Total Kredit (${totalMasterCredit})`);
       }
 
-      if (masterEntries.length > 0) {
-        const masterJournalIdResult = await createGeneralJournal(
-          currentCompany.id,
-          new Date().toISOString().split('T')[0],
-          `Payroll ${period} (Gabungan)`,
-          `PAY-MASTER-${Date.now()}`,
-          'PAYROLL_MASTER',
-          0,
-          masterEntries
-        );
-        if (!masterJournalIdResult) throw new Error('Gagal membuat master journal');
-        masterJournalId = masterJournalIdResult;
+      if (masterEntries.length === 0) {
+        throw new Error('Tidak ada entries yang valid');
       }
 
-      // ========== 2. JURNAL PER KARYAWAN (FIXED) ==========
+      // Buat satu jurnal master
+      const masterJournalIdResult = await createGeneralJournal(
+        currentCompany.id,
+        new Date().toISOString().split('T')[0],
+        `Payroll ${period} (Gabungan)`,
+        `PAY-MASTER-${Date.now()}`,
+        'PAYROLL_MASTER',
+        0,
+        masterEntries
+      );
+      if (!masterJournalIdResult) throw new Error('Gagal membuat master journal');
+      masterJournalId = masterJournalIdResult;
+
+      // Update semua payroll draft dengan status posted dan master_journal_id
       for (const row of draftRows) {
         try {
-          const bank = bankAccounts.find(b => b.id === row.bank_account_id);
-          if (!bank) { failCount++; continue; }
-
-          const entries: any[] = [];
-
-          // Debit
-          if (row.gaji_pokok > 0) {
-            entries.push({
-              account_id: defaultAccounts.bebanGajiPokok?.id || 0,
-              account_code: defaultAccounts.bebanGajiPokok?.code || '',
-              account_name: defaultAccounts.bebanGajiPokok?.name || 'Beban Gaji Pokok',
-              debit: row.gaji_pokok,
-              credit: 0,
-            });
-          }
-          if (row.tunjangan_lainnya > 0) {
-            entries.push({
-              account_id: defaultAccounts.bebanTunjangan?.id || 0,
-              account_code: defaultAccounts.bebanTunjangan?.code || '',
-              account_name: defaultAccounts.bebanTunjangan?.name || 'Beban Tunjangan',
-              debit: row.tunjangan_lainnya,
-              credit: 0,
-            });
-          }
-          if (row.tunjangan_pph21 > 0) {
-            entries.push({
-              account_id: defaultAccounts.bebanTunjanganPph21?.id || 0,
-              account_code: defaultAccounts.bebanTunjanganPph21?.code || '',
-              account_name: defaultAccounts.bebanTunjanganPph21?.name || 'Beban Tunjangan PPh 21',
-              debit: row.tunjangan_pph21,
-              credit: 0,
-            });
-          }
-          if (row.bpjs_kesehatan > 0) {
-            entries.push({
-              account_id: defaultAccounts.bebanBpjsKes?.id || 0,
-              account_code: defaultAccounts.bebanBpjsKes?.code || '',
-              account_name: defaultAccounts.bebanBpjsKes?.name || 'Beban BPJS Kesehatan',
-              debit: row.bpjs_kesehatan,
-              credit: 0,
-            });
-          }
-          if (row.bpjs_tk > 0) {
-            entries.push({
-              account_id: defaultAccounts.bebanBpjsTk?.id || 0,
-              account_code: defaultAccounts.bebanBpjsTk?.code || '',
-              account_name: defaultAccounts.bebanBpjsTk?.name || 'Beban BPJS TK',
-              debit: row.bpjs_tk,
-              credit: 0,
-            });
-          }
-
-          // 🔥 KREDIT (LENGKAP DENGAN BPJS & PPH21)
-          entries.push({
-            account_id: bank.id,
-            account_code: bank.code,
-            account_name: bank.name,
-            debit: 0,
-            credit: row.gaji_bersih,
-          });
-          
-          if (row.bpjs_kesehatan > 0 && defaultAccounts.utangBpjsKes) {
-            entries.push({
-              account_id: defaultAccounts.utangBpjsKes.id,
-              account_code: defaultAccounts.utangBpjsKes.code,
-              account_name: defaultAccounts.utangBpjsKes.name,
-              debit: 0,
-              credit: row.bpjs_kesehatan,
-            });
-          }
-          if (row.bpjs_tk > 0 && defaultAccounts.utangBpjsTk) {
-            entries.push({
-              account_id: defaultAccounts.utangBpjsTk.id,
-              account_code: defaultAccounts.utangBpjsTk.code,
-              account_name: defaultAccounts.utangBpjsTk.name,
-              debit: 0,
-              credit: row.bpjs_tk,
-            });
-          }
-          if (row.potongan_pph21 > 0 && defaultAccounts.utangPph21) {
-            entries.push({
-              account_id: defaultAccounts.utangPph21.id,
-              account_code: defaultAccounts.utangPph21.code,
-              account_name: defaultAccounts.utangPph21.name,
-              debit: 0,
-              credit: row.potongan_pph21,
-            });
-          }
-
-          // 🔥 VALIDASI ENTRIES PER KARYAWAN
-          const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
-          const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
-          if (totalDebit !== totalCredit) {
-            console.error(`❌ Entries tidak balance untuk ${row.employee_name}: Debit ${totalDebit}, Kredit ${totalCredit}`);
-            failCount++;
-            continue;
-          }
-
-          const journalId = await createGeneralJournal(
-            currentCompany.id,
-            new Date().toISOString().split('T')[0],
-            `Payroll ${row.employee_name} - ${period}`,
-            `PAY-${row.id}`,
-            'PAYROLL',
-            row.id || 0,
-            entries
-          );
-
-          if (!journalId) { failCount++; continue; }
-
           await supabase
             .from('payroll')
             .update({
               status: 'posted',
-              journal_id: journalId,
+              journal_id: masterJournalId, // semua payroll pakai journal_id yang sama (master)
               master_journal_id: masterJournalId,
               posted_by: user?.email,
               posted_at: new Date().toISOString(),
             })
             .eq('id', row.id);
-
           successCount++;
         } catch (err) {
-          console.error('Error posting payroll:', err);
+          console.error('Error updating payroll:', err);
           failCount++;
         }
       }
 
       await fetchPayrolls();
-      alert(`✅ ${successCount} payroll berhasil diposting\n❌ ${failCount} gagal`);
+      alert(`✅ ${successCount} payroll berhasil diposting dengan satu jurnal gabungan.\n❌ ${failCount} gagal`);
     } catch (err: any) {
       alert('Error: ' + err.message);
     } finally {
@@ -1159,7 +1070,7 @@ export default function Payroll() {
               </button>
               <button
                 onClick={saveOvertime}
-                className="px-4 py-2 bg-accent text-white rounded-lg"
+                className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors"
               >
                 {editingOvertimeId ? 'Update' : 'Simpan'}
               </button>

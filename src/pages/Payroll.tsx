@@ -1,14 +1,22 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Edit2, Trash2, Send, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { 
+  Plus, Search, Eye, Edit2, Trash2, Send, CheckCircle, XCircle, Loader2, 
+  Clock, FileText, Copy, Save, CheckSquare, X
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
-import { formatCurrency, createPayrollJournal, createGeneralJournal, getDefaultAccount } from '../lib/accountingHelpers';
+import { 
+  formatCurrency, 
+  createGeneralJournal, 
+  getDefaultAccount,
+  getNextJournalNumber
+} from '../lib/accountingHelpers';
 
-type Payroll = {
-  id: number;
+type PayrollRow = {
+  id?: number;
   employee_name: string;
   period: string;
   gaji_pokok: number;
@@ -17,10 +25,11 @@ type Payroll = {
   tunjangan_lainnya: number;
   pph21: number;
   gaji_bersih: number;
-  bank_account_id: number | null;
+  bank_account_id: number;
   status: 'draft' | 'posted';
   journal_id: number | null;
-  created_at: string;
+  master_journal_id: number | null;
+  is_new?: boolean;
 };
 
 type Overtime = {
@@ -28,9 +37,9 @@ type Overtime = {
   payroll_id: number;
   amount: number;
   description: string;
-  bank_account_id: number | null;
-  journal_id: number | null;
+  bank_account_id: number;
   status: 'draft' | 'posted';
+  journal_id: number | null;
 };
 
 type Coa = {
@@ -44,63 +53,43 @@ export default function Payroll() {
   const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
-  const [payrolls, setPayrolls] = useState<Payroll[]>([]);
+  
+  // ============ STATE ============
+  const [rows, setRows] = useState<PayrollRow[]>([]);
   const [overtimes, setOvertimes] = useState<Overtime[]>([]);
-  const [coaList, setCoaList] = useState<Coa[]>([]);
   const [bankAccounts, setBankAccounts] = useState<Coa[]>([]);
+  const [coaList, setCoaList] = useState<Coa[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [postingAll, setPostingAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [showModal, setShowModal] = useState(false);
+  const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [showOvertimeModal, setShowOvertimeModal] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingOvertimeId, setEditingOvertimeId] = useState<number | null>(null);
   const [selectedPayrollId, setSelectedPayrollId] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  // ============ STATE FORM GAJI ============
-  const [formData, setFormData] = useState({
-    employee_name: '',
-    period: new Date().toISOString().slice(0, 7),
-    gaji_pokok: 5247870,
-    bpjs_kesehatan: 0,
-    bpjs_tk: 0,
-    tunjangan_lainnya: 0,
-    pph21: 0,
-    bank_account_id: 0,
-  });
-
-  // ============ STATE FORM LEMBURAN ============
-  const [overtimeData, setOvertimeData] = useState({
-    payroll_id: 0,
-    amount: 0,
-    description: '',
-    bank_account_id: 0,
-  });
-
-  // ============ AUTO-CALCULATE ============
-  useEffect(() => {
-    const gajiPokok = formData.gaji_pokok || 0;
-    const bpjsKes = Math.round(gajiPokok * 0.05); // 5%
-    const bpjsTk = Math.round(gajiPokok * 0.0924); // 9.24%
-    const gajiBersih = gajiPokok + (formData.tunjangan_lainnya || 0);
-
-    setFormData(prev => ({
-      ...prev,
-      bpjs_kesehatan: bpjsKes,
-      bpjs_tk: bpjsTk,
-      // gaji_bersih tidak disimpan di state, dihitung langsung
-    }));
-  }, [formData.gaji_pokok, formData.tunjangan_lainnya]);
+  const [selectedPayrollName, setSelectedPayrollName] = useState('');
+  const [overtimeForm, setOvertimeForm] = useState({ amount: 0, description: '', bank_account_id: 0 });
+  const [editingOvertimeId, setEditingOvertimeId] = useState<number | null>(null);
+  const [copyPrevious, setCopyPrevious] = useState(false);
+  const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
+  
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
 
   // ============ FETCH DATA ============
   useEffect(() => {
     if (currentCompany?.id) {
-      fetchPayrolls();
-      fetchCoa();
       fetchBankAccounts();
+      fetchCoa();
+      if (period) fetchPayrolls();
     }
   }, [currentCompany]);
+
+  useEffect(() => {
+    if (currentCompany?.id && period) {
+      fetchPayrolls();
+    }
+  }, [period]);
 
   const fetchCoa = async () => {
     if (!currentCompany?.id) return;
@@ -130,220 +119,308 @@ export default function Payroll() {
     if (!currentCompany?.id) return;
     setLoading(true);
     
-    // Ambil payroll
-    const { data: payrollData } = await supabase
+    const { data, error } = await supabase
       .from('payroll')
       .select('*')
       .eq('company_id', currentCompany.id)
-      .order('period', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    if (payrollData) {
-      // Ambil overtime untuk setiap payroll
-      const withOvertimes = await Promise.all(
-        payrollData.map(async (p) => {
-          const { data: otData } = await supabase
-            .from('payroll_overtime')
-            .select('*')
-            .eq('payroll_id', p.id);
-          return { ...p, overtimes: otData || [] };
-        })
-      );
-      setPayrolls(withOvertimes);
+      .eq('period', `${period}-01`)
+      .order('employee_name');
+    
+    if (error) {
+      console.error('Error fetching payroll:', error);
+      setLoading(false);
+      return;
+    }
+    
+    if (data && data.length > 0) {
+      setRows(data);
+      // Ambil overtimes
+      const ids = data.map(r => r.id);
+      const { data: otData } = await supabase
+        .from('payroll_overtime')
+        .select('*')
+        .in('payroll_id', ids);
+      setOvertimes(otData || []);
+    } else {
+      setRows([]);
+      setOvertimes([]);
     }
     setLoading(false);
   };
 
-  // ============ CRUD GAJI ============
-  const handleSave = async () => {
-    if (!formData.employee_name || !formData.period) {
-      alert('Isi nama karyawan dan periode');
-      return;
-    }
-    if (!formData.bank_account_id) {
-      alert('Pilih akun bank/kas');
-      return;
-    }
+  // ============ COPY FROM PREVIOUS MONTH ============
+  const copyFromPreviousMonth = async () => {
     if (!currentCompany?.id) return;
-
-    const gajiBersih = formData.gaji_pokok + formData.tunjangan_lainnya;
-
-    const dataToInsert = {
-      company_id: currentCompany.id,
-      employee_name: formData.employee_name,
-      period: `${formData.period}-01`,
-      gaji_pokok: formData.gaji_pokok,
-      bpjs_kesehatan: formData.bpjs_kesehatan,
-      bpjs_tk: formData.bpjs_tk,
-      tunjangan_lainnya: formData.tunjangan_lainnya,
-      pph21: formData.pph21,
-      gaji_bersih: gajiBersih,
-      bank_account_id: formData.bank_account_id,
-      status: 'draft',
-      created_by: user?.email,
-    };
-
-    if (editingId) {
-      const { error } = await supabase
-        .from('payroll')
-        .update(dataToInsert)
-        .eq('id', editingId);
-      if (error) {
-        alert('Gagal update: ' + error.message);
-        return;
-      }
+    if (!confirm(`Copy data payroll dari bulan sebelumnya ke ${period}?`)) return;
+    
+    setIsLoadingPrevious(true);
+    
+    const prevDate = new Date(period);
+    prevDate.setMonth(prevDate.getMonth() - 1);
+    const prevPeriod = prevDate.toISOString().slice(0, 7);
+    
+    const { data, error } = await supabase
+      .from('payroll')
+      .select('*')
+      .eq('company_id', currentCompany.id)
+      .eq('period', `${prevPeriod}-01`)
+      .eq('status', 'posted');
+    
+    if (error) {
+      alert('Gagal mengambil data bulan sebelumnya');
+      setIsLoadingPrevious(false);
+      return;
+    }
+    
+    if (data && data.length > 0) {
+      const newRows = data.map(r => ({
+        employee_name: r.employee_name,
+        period: `${period}-01`,
+        gaji_pokok: r.gaji_pokok,
+        bpjs_kesehatan: r.bpjs_kesehatan,
+        bpjs_tk: r.bpjs_tk,
+        tunjangan_lainnya: r.tunjangan_lainnya,
+        pph21: r.pph21 || 0,
+        gaji_bersih: r.gaji_bersih,
+        bank_account_id: r.bank_account_id,
+        status: 'draft' as const,
+        journal_id: null,
+        master_journal_id: null,
+        is_new: true,
+      }));
+      setRows(newRows);
+      alert(`${data.length} data payroll berhasil di-copy dari ${prevPeriod}`);
     } else {
-      const { error } = await supabase
-        .from('payroll')
-        .insert([dataToInsert]);
-      if (error) {
-        alert('Gagal simpan: ' + error.message);
-        return;
-      }
+      alert(`Tidak ada data payroll untuk periode ${prevPeriod}`);
     }
-
-    setShowModal(false);
-    resetForm();
-    fetchPayrolls();
+    setIsLoadingPrevious(false);
   };
 
-  // ============ POST PAYROLL ============
-  const handlePost = async (id: number) => {
-    if (!confirm('Posting payroll ini? Jurnal akan dibuat.')) return;
-    if (!currentCompany?.id) return;
+  // ============ AUTO CALCULATE ============
+  const calculateRow = (row: PayrollRow): PayrollRow => {
+    const gajiPokok = Number(row.gaji_pokok) || 0;
+    const bpjsKes = Math.round(gajiPokok * 0.05);
+    const bpjsTk = Math.round(gajiPokok * 0.0924);
+    const tunjangan = Number(row.tunjangan_lainnya) || 0;
+    const gajiBersih = gajiPokok + tunjangan;
+    
+    return {
+      ...row,
+      bpjs_kesehatan: bpjsKes,
+      bpjs_tk: bpjsTk,
+      gaji_bersih: gajiBersih,
+    };
+  };
 
-    setSubmitting(true);
+  // ============ UPDATE ROW & AUTO-SAVE ============
+  const updateRow = (index: number, field: keyof PayrollRow, value: any) => {
+    const newRows = [...rows];
+    let updated = { ...newRows[index], [field]: value };
+    // Recalculate
+    updated = calculateRow(updated);
+    newRows[index] = updated;
+    setRows(newRows);
+    // Trigger auto-save
+    autoSave();
+  };
+
+  const addRow = () => {
+    const newRow: PayrollRow = {
+      employee_name: '',
+      period: `${period}-01`,
+      gaji_pokok: 5247870,
+      bpjs_kesehatan: 0,
+      bpjs_tk: 0,
+      tunjangan_lainnya: 0,
+      pph21: 0,
+      gaji_bersih: 0,
+      bank_account_id: 0,
+      status: 'draft',
+      journal_id: null,
+      master_journal_id: null,
+      is_new: true,
+    };
+    setRows([...rows, newRow]);
+  };
+
+  const deleteRow = async (index: number) => {
+    const row = rows[index];
+    if (!row.id) {
+      setRows(rows.filter((_, i) => i !== index));
+      return;
+    }
+    if (!confirm(`Hapus payroll untuk ${row.employee_name}?`)) return;
+    
+    const { error } = await supabase
+      .from('payroll')
+      .delete()
+      .eq('id', row.id);
+    
+    if (!error) {
+      setRows(rows.filter((_, i) => i !== index));
+      // Hapus juga overtimes terkait
+      setOvertimes(overtimes.filter(ot => ot.payroll_id !== row.id));
+    } else {
+      alert('Gagal menghapus: ' + error.message);
+    }
+  };
+
+  // ============ AUTO SAVE ============
+  const autoSave = () => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+    }
+    autoSaveTimer.current = setTimeout(() => {
+      saveAllRows();
+    }, 1500);
+  };
+
+  const saveAllRows = async () => {
+    if (!currentCompany?.id) return;
+    if (rows.length === 0) return;
+    if (saving) return;
+    
+    setSaving(true);
     try {
-      const { data: payroll, error: fetchError } = await supabase
-        .from('payroll')
-        .select('*')
-        .eq('id', id)
-        .single();
+      for (const row of rows) {
+        if (!row.employee_name.trim()) continue;
+        
+        const dataToSave = {
+          company_id: currentCompany.id,
+          employee_name: row.employee_name.trim(),
+          period: `${period}-01`,
+          gaji_pokok: row.gaji_pokok,
+          bpjs_kesehatan: row.bpjs_kesehatan,
+          bpjs_tk: row.bpjs_tk,
+          tunjangan_lainnya: row.tunjangan_lainnya,
+          pph21: row.pph21 || 0,
+          gaji_bersih: row.gaji_bersih,
+          bank_account_id: row.bank_account_id,
+          status: 'draft',
+          created_by: user?.email,
+        };
 
-      if (fetchError || !payroll) {
-        alert('Data payroll tidak ditemukan');
-        return;
+        if (row.id) {
+          await supabase
+            .from('payroll')
+            .update(dataToSave)
+            .eq('id', row.id);
+        } else {
+          const { data } = await supabase
+            .from('payroll')
+            .insert([dataToSave])
+            .select();
+          if (data && data[0]) {
+            row.id = data[0].id;
+          }
+        }
       }
-
-      // 🔥 BUAT JURNAL
-      const journalId = await createPayrollJournal(
-        currentCompany.id,
-        payroll,
-        user?.email || 'system'
-      );
-
-      if (!journalId) {
-        alert('Gagal membuat jurnal');
-        return;
-      }
-
-      // Update status
-      const { error: updateError } = await supabase
-        .from('payroll')
-        .update({
-          status: 'posted',
-          journal_id: journalId,
-          posted_by: user?.email,
-          posted_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-
-      if (updateError) throw updateError;
-
-      alert('Payroll berhasil diposting!');
-      fetchPayrolls();
-    } catch (err: any) {
-      alert('Gagal posting: ' + err.message);
+    } catch (error) {
+      console.error('Auto-save error:', error);
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  // ============ CRUD LEMBURAN ============
-  const handleAddOvertime = async () => {
-    if (!selectedPayrollId) {
-      alert('Pilih payroll terlebih dahulu');
-      return;
-    }
-    if (!overtimeData.amount || overtimeData.amount <= 0) {
-      alert('Masukkan jumlah lemburan');
-      return;
-    }
-    if (!overtimeData.bank_account_id) {
-      alert('Pilih akun bank/kas');
-      return;
-    }
-    if (!overtimeData.description) {
-      alert('Masukkan deskripsi lemburan');
-      return;
-    }
-    if (!currentCompany?.id) return;
+  // ============ OVERTIME ============
+  const openOvertimeModal = (payrollId: number, employeeName: string) => {
+    setSelectedPayrollId(payrollId);
+    setSelectedPayrollName(employeeName);
+    setEditingOvertimeId(null);
+    setOvertimeForm({ amount: 0, description: '', bank_account_id: 0 });
+    setShowOvertimeModal(true);
+  };
 
-    const dataToInsert = {
+  const editOvertime = (ot: Overtime) => {
+    setSelectedPayrollId(ot.payroll_id);
+    const row = rows.find(r => r.id === ot.payroll_id);
+    setSelectedPayrollName(row?.employee_name || '');
+    setEditingOvertimeId(ot.id);
+    setOvertimeForm({
+      amount: ot.amount,
+      description: ot.description,
+      bank_account_id: ot.bank_account_id,
+    });
+    setShowOvertimeModal(true);
+  };
+
+  const saveOvertime = async () => {
+    if (!currentCompany?.id || !selectedPayrollId) return;
+    if (!overtimeForm.description || overtimeForm.amount <= 0 || !overtimeForm.bank_account_id) {
+      alert('Lengkapi semua field lemburan');
+      return;
+    }
+
+    const dataToSave = {
       payroll_id: selectedPayrollId,
       company_id: currentCompany.id,
-      amount: overtimeData.amount,
-      description: overtimeData.description,
-      bank_account_id: overtimeData.bank_account_id,
-      status: 'draft',
+      amount: overtimeForm.amount,
+      description: overtimeForm.description,
+      bank_account_id: overtimeForm.bank_account_id,
+      status: 'draft' as const,
       created_by: user?.email,
     };
 
     if (editingOvertimeId) {
       const { error } = await supabase
         .from('payroll_overtime')
-        .update(dataToInsert)
+        .update(dataToSave)
         .eq('id', editingOvertimeId);
-      if (error) {
-        alert('Gagal update lemburan: ' + error.message);
-        return;
+      if (!error) {
+        setOvertimes(overtimes.map(ot => 
+          ot.id === editingOvertimeId ? { ...ot, ...dataToSave } : ot
+        ));
+      } else {
+        alert('Gagal update: ' + error.message);
       }
     } else {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('payroll_overtime')
-        .insert([dataToInsert]);
-      if (error) {
-        alert('Gagal simpan lemburan: ' + error.message);
-        return;
+        .insert([dataToSave])
+        .select();
+      if (!error && data) {
+        setOvertimes([...overtimes, data[0]]);
+      } else {
+        alert('Gagal simpan: ' + error.message);
       }
     }
-
     setShowOvertimeModal(false);
-    setOvertimeData({ payroll_id: 0, amount: 0, description: '', bank_account_id: 0 });
-    fetchPayrolls();
   };
 
-  const handlePostOvertime = async (id: number, payrollId: number) => {
+  const deleteOvertime = async (id: number) => {
+    if (!confirm('Hapus lemburan ini?')) return;
+    const { error } = await supabase
+      .from('payroll_overtime')
+      .delete()
+      .eq('id', id);
+    if (!error) {
+      setOvertimes(overtimes.filter(ot => ot.id !== id));
+    }
+  };
+
+  const postOvertime = async (id: number) => {
     if (!confirm('Posting lemburan ini?')) return;
     if (!currentCompany?.id) return;
 
     try {
-      const { data: overtime, error: fetchError } = await supabase
-        .from('payroll_overtime')
-        .select('*')
-        .eq('id', id)
-        .single();
+      const ot = overtimes.find(o => o.id === id);
+      if (!ot) return;
 
-      if (fetchError || !overtime) {
-        alert('Data lemburan tidak ditemukan');
-        return;
-      }
+      // Cari akun beban survei lokasi (atau beban lainnya)
+      const expenseAcc = await getDefaultAccount(currentCompany.id, 'expense');
+      const bankAcc = bankAccounts.find(b => b.id === ot.bank_account_id);
 
-      // 🔥 BUAT JURNAL LEMBURAN
-      const bebanAkun = await getDefaultAccount(currentCompany.id, 'expense');
-      const bankAcc = bankAccounts.find(b => b.id === overtime.bank_account_id);
-
-      if (!bebanAkun || !bankAcc) {
+      if (!expenseAcc || !bankAcc) {
         alert('Akun tidak ditemukan');
         return;
       }
 
       const entries = [
         {
-          account_id: bebanAkun.id,
-          account_code: bebanAkun.code,
-          account_name: bebanAkun.name,
-          debit: overtime.amount,
+          account_id: expenseAcc.id,
+          account_code: expenseAcc.code,
+          account_name: expenseAcc.name,
+          debit: ot.amount,
           credit: 0,
         },
         {
@@ -351,22 +428,22 @@ export default function Payroll() {
           account_code: bankAcc.code,
           account_name: bankAcc.name,
           debit: 0,
-          credit: overtime.amount,
+          credit: ot.amount,
         },
       ];
 
       const journalId = await createGeneralJournal(
         currentCompany.id,
         new Date().toISOString().split('T')[0],
-        `Lemburan: ${overtime.description}`,
-        `OT-${overtime.id}`,
+        `Lemburan: ${ot.description} (${selectedPayrollName || 'Karyawan'})`,
+        `OT-${ot.id}`,
         'OVERTIME',
-        overtime.id,
+        ot.id,
         entries
       );
 
       if (!journalId) {
-        alert('Gagal membuat jurnal lemburan');
+        alert('Gagal membuat jurnal');
         return;
       }
 
@@ -380,220 +457,528 @@ export default function Payroll() {
         })
         .eq('id', id);
 
+      setOvertimes(overtimes.map(o => 
+        o.id === id ? { ...o, status: 'posted', journal_id: journalId } : o
+      ));
       alert('Lemburan berhasil diposting!');
-      fetchPayrolls();
     } catch (err: any) {
-      alert('Gagal posting lemburan: ' + err.message);
+      alert('Gagal posting: ' + err.message);
     }
   };
 
-  const handleDeleteOvertime = async (id: number) => {
-    if (!confirm('Yakin ingin menghapus lemburan ini?')) return;
-    const { error } = await supabase
-      .from('payroll_overtime')
-      .delete()
-      .eq('id', id);
-    if (!error) fetchPayrolls();
+  // ============ POST ALL PAYROLL (2 JURNAL) ============
+  const postAll = async () => {
+    const draftRows = rows.filter(r => r.status === 'draft' && r.employee_name.trim());
+    if (draftRows.length === 0) {
+      alert('Tidak ada payroll draft untuk diposting');
+      return;
+    }
+
+    if (!confirm(`Posting ${draftRows.length} payroll?`)) return;
+    if (!currentCompany?.id) return;
+
+    setPostingAll(true);
+    let successCount = 0;
+    let failCount = 0;
+    let masterJournalId: number | null = null;
+
+    try {
+      // === 1. Buat Jurnal Gabungan (Master) ===
+      const masterEntries: any[] = [];
+      let masterDescription = `Payroll ${period} (Gabungan)`;
+
+      // Kumpulkan semua entries dari semua payroll
+      for (const row of draftRows) {
+        // Cari akun-akun
+        const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanBpjsTk = await getDefaultAccount(currentCompany.id, 'expense');
+        const bebanPph21 = await getDefaultAccount(currentCompany.id, 'expense');
+        const utangBpjsKes = await getDefaultAccount(currentCompany.id, 'liability');
+        const utangBpjsTk = await getDefaultAccount(currentCompany.id, 'liability');
+        const utangPph21 = await getDefaultAccount(currentCompany.id, 'liability');
+        const bank = bankAccounts.find(b => b.id === row.bank_account_id);
+
+        if (!bank) {
+          alert(`Bank tidak ditemukan untuk ${row.employee_name}`);
+          failCount++;
+          continue;
+        }
+
+        // Tambahkan entries ke master
+        // Debit
+        masterEntries.push({
+          account_id: bebanGajiPokok?.id || 0,
+          account_code: bebanGajiPokok?.code || '',
+          account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
+          debit: row.gaji_pokok,
+          credit: 0,
+        });
+        if (row.tunjangan_lainnya > 0) {
+          masterEntries.push({
+            account_id: bebanTunjangan?.id || 0,
+            account_code: bebanTunjangan?.code || '',
+            account_name: bebanTunjangan?.name || 'Beban Tunjangan',
+            debit: row.tunjangan_lainnya,
+            credit: 0,
+          });
+        }
+        if (row.bpjs_kesehatan > 0) {
+          masterEntries.push({
+            account_id: bebanBpjsKes?.id || 0,
+            account_code: bebanBpjsKes?.code || '',
+            account_name: bebanBpjsKes?.name || 'Beban BPJS Kesehatan',
+            debit: row.bpjs_kesehatan,
+            credit: 0,
+          });
+        }
+        if (row.bpjs_tk > 0) {
+          masterEntries.push({
+            account_id: bebanBpjsTk?.id || 0,
+            account_code: bebanBpjsTk?.code || '',
+            account_name: bebanBpjsTk?.name || 'Beban BPJS TK',
+            debit: row.bpjs_tk,
+            credit: 0,
+          });
+        }
+        if (row.pph21 > 0) {
+          masterEntries.push({
+            account_id: bebanPph21?.id || 0,
+            account_code: bebanPph21?.code || '',
+            account_name: bebanPph21?.name || 'Beban PPh 21',
+            debit: row.pph21,
+            credit: 0,
+          });
+        }
+
+        // Kredit
+        masterEntries.push({
+          account_id: bank.id,
+          account_code: bank.code,
+          account_name: bank.name,
+          debit: 0,
+          credit: row.gaji_bersih,
+        });
+        if (row.bpjs_kesehatan > 0 && utangBpjsKes) {
+          masterEntries.push({
+            account_id: utangBpjsKes.id,
+            account_code: utangBpjsKes.code,
+            account_name: utangBpjsKes.name,
+            debit: 0,
+            credit: row.bpjs_kesehatan,
+          });
+        }
+        if (row.bpjs_tk > 0 && utangBpjsTk) {
+          masterEntries.push({
+            account_id: utangBpjsTk.id,
+            account_code: utangBpjsTk.code,
+            account_name: utangBpjsTk.name,
+            debit: 0,
+            credit: row.bpjs_tk,
+          });
+        }
+        if (row.pph21 > 0 && utangPph21) {
+          masterEntries.push({
+            account_id: utangPph21.id,
+            account_code: utangPph21.code,
+            account_name: utangPph21.name,
+            debit: 0,
+            credit: row.pph21,
+          });
+        }
+      }
+
+      // Buat master journal
+      if (masterEntries.length > 0) {
+        const year = new Date().getFullYear();
+        const seq = await getNextJournalNumber(currentCompany.id, year);
+        const journalNumber = `JU-${year}-${String(seq).padStart(4, '0')}`;
+
+        const { data: masterJournal, error: mjError } = await supabase
+          .from('journals')
+          .insert({
+            company_id: currentCompany.id,
+            journal_number: journalNumber,
+            journal_date: new Date().toISOString().split('T')[0],
+            description: masterDescription,
+            status: 'posted',
+            posted_by: user?.email || 'system',
+            posted_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (mjError || !masterJournal) {
+          throw new Error('Gagal membuat master journal: ' + mjError?.message);
+        }
+
+        masterJournalId = masterJournal.id;
+
+        // Insert lines master
+        const masterLines = masterEntries.map(e => ({
+          journal_id: masterJournal.id,
+          coa_id: e.account_id,
+          account_code: e.account_code,
+          account_name: e.account_name,
+          debit: e.debit,
+          credit: e.credit,
+        }));
+        await supabase.from('journal_lines').insert(masterLines);
+      }
+
+      // === 2. Buat Jurnal Per Karyawan ===
+      for (const row of draftRows) {
+        try {
+          const bank = bankAccounts.find(b => b.id === row.bank_account_id);
+          if (!bank) {
+            failCount++;
+            continue;
+          }
+
+          const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
+          const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
+          const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
+          const bebanBpjsTk = await getDefaultAccount(currentCompany.id, 'expense');
+          const bebanPph21 = await getDefaultAccount(currentCompany.id, 'expense');
+          const utangBpjsKes = await getDefaultAccount(currentCompany.id, 'liability');
+          const utangBpjsTk = await getDefaultAccount(currentCompany.id, 'liability');
+          const utangPph21 = await getDefaultAccount(currentCompany.id, 'liability');
+
+          const entries: any[] = [];
+
+          // Debit
+          entries.push({
+            account_id: bebanGajiPokok?.id || 0,
+            account_code: bebanGajiPokok?.code || '',
+            account_name: bebanGajiPokok?.name || 'Beban Gaji Pokok',
+            debit: row.gaji_pokok,
+            credit: 0,
+          });
+          if (row.tunjangan_lainnya > 0) {
+            entries.push({
+              account_id: bebanTunjangan?.id || 0,
+              account_code: bebanTunjangan?.code || '',
+              account_name: bebanTunjangan?.name || 'Beban Tunjangan',
+              debit: row.tunjangan_lainnya,
+              credit: 0,
+            });
+          }
+          if (row.bpjs_kesehatan > 0) {
+            entries.push({
+              account_id: bebanBpjsKes?.id || 0,
+              account_code: bebanBpjsKes?.code || '',
+              account_name: bebanBpjsKes?.name || 'Beban BPJS Kesehatan',
+              debit: row.bpjs_kesehatan,
+              credit: 0,
+            });
+          }
+          if (row.bpjs_tk > 0) {
+            entries.push({
+              account_id: bebanBpjsTk?.id || 0,
+              account_code: bebanBpjsTk?.code || '',
+              account_name: bebanBpjsTk?.name || 'Beban BPJS TK',
+              debit: row.bpjs_tk,
+              credit: 0,
+            });
+          }
+          if (row.pph21 > 0) {
+            entries.push({
+              account_id: bebanPph21?.id || 0,
+              account_code: bebanPph21?.code || '',
+              account_name: bebanPph21?.name || 'Beban PPh 21',
+              debit: row.pph21,
+              credit: 0,
+            });
+          }
+
+          // Kredit
+          entries.push({
+            account_id: bank.id,
+            account_code: bank.code,
+            account_name: bank.name,
+            debit: 0,
+            credit: row.gaji_bersih,
+          });
+          if (row.bpjs_kesehatan > 0 && utangBpjsKes) {
+            entries.push({
+              account_id: utangBpjsKes.id,
+              account_code: utangBpjsKes.code,
+              account_name: utangBpjsKes.name,
+              debit: 0,
+              credit: row.bpjs_kesehatan,
+            });
+          }
+          if (row.bpjs_tk > 0 && utangBpjsTk) {
+            entries.push({
+              account_id: utangBpjsTk.id,
+              account_code: utangBpjsTk.code,
+              account_name: utangBpjsTk.name,
+              debit: 0,
+              credit: row.bpjs_tk,
+            });
+          }
+          if (row.pph21 > 0 && utangPph21) {
+            entries.push({
+              account_id: utangPph21.id,
+              account_code: utangPph21.code,
+              account_name: utangPph21.name,
+              debit: 0,
+              credit: row.pph21,
+            });
+          }
+
+          const journalId = await createGeneralJournal(
+            currentCompany.id,
+            new Date().toISOString().split('T')[0],
+            `Payroll ${row.employee_name} - ${period}`,
+            `PAY-${row.id}`,
+            'PAYROLL',
+            row.id || 0,
+            entries
+          );
+
+          if (!journalId) {
+            failCount++;
+            continue;
+          }
+
+          // Update row
+          await supabase
+            .from('payroll')
+            .update({
+              status: 'posted',
+              journal_id: journalId,
+              master_journal_id: masterJournalId,
+              posted_by: user?.email,
+              posted_at: new Date().toISOString(),
+            })
+            .eq('id', row.id);
+
+          successCount++;
+        } catch (err) {
+          failCount++;
+        }
+      }
+
+      // Refresh data
+      await fetchPayrolls();
+      alert(`✅ ${successCount} payroll berhasil diposting\n❌ ${failCount} gagal`);
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setPostingAll(false);
+    }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Yakin ingin menghapus payroll ini?')) return;
-    const { error } = await supabase
-      .from('payroll')
-      .delete()
-      .eq('id', id);
-    if (!error) fetchPayrolls();
-  };
-
-  const handleEdit = (payroll: any) => {
-    setEditingId(payroll.id);
-    setFormData({
-      employee_name: payroll.employee_name,
-      period: payroll.period.slice(0, 7),
-      gaji_pokok: payroll.gaji_pokok,
-      bpjs_kesehatan: payroll.bpjs_kesehatan,
-      bpjs_tk: payroll.bpjs_tk,
-      tunjangan_lainnya: payroll.tunjangan_lainnya,
-      pph21: payroll.pph21,
-      bank_account_id: payroll.bank_account_id || 0,
-    });
-    setShowModal(true);
-  };
-
-  const resetForm = () => {
-    setFormData({
-      employee_name: '',
-      period: new Date().toISOString().slice(0, 7),
-      gaji_pokok: 5247870,
-      bpjs_kesehatan: 0,
-      bpjs_tk: 0,
-      tunjangan_lainnya: 0,
-      pph21: 0,
-      bank_account_id: 0,
-    });
-    setEditingId(null);
-  };
-
-  const openOvertimeModal = (payrollId: number) => {
-    setSelectedPayrollId(payrollId);
-    setEditingOvertimeId(null);
-    setOvertimeData({ payroll_id: payrollId, amount: 0, description: '', bank_account_id: 0 });
-    setShowOvertimeModal(true);
-  };
-
-  // ============ FILTER ============
-  const filteredPayrolls = payrolls.filter(p => {
-    const matchSearch = p.employee_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        p.period.includes(searchTerm);
-    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
+  // ============ RENDER ============
+  const filteredRows = rows.filter(r => {
+    const matchSearch = r.employee_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchStatus = filterStatus === 'all' || r.status === filterStatus;
     return matchSearch && matchStatus;
   });
 
-  const stats = {
-    total: payrolls.length,
-    draft: payrolls.filter(p => p.status === 'draft').length,
-    posted: payrolls.filter(p => p.status === 'posted').length,
-  };
+  const totalGaji = filteredRows.reduce((sum, r) => sum + r.gaji_bersih, 0);
 
   if (!currentCompany) return <div className="flex justify-center py-12">Loading...</div>;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between animate-slide-in-up">
+      <div className="flex items-center justify-between animate-slide-in-up flex-wrap gap-4">
         <div>
           <h1 className="font-display text-3xl font-bold text-text">Payroll</h1>
-          <p className="text-text-muted mt-1">Kelola gaji karyawan dan buat jurnal otomatis</p>
+          <p className="text-text-muted mt-1">Kelola gaji karyawan dengan input massal & auto-jurnal</p>
         </div>
-        <button
-          onClick={() => { resetForm(); setShowModal(true); }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30"
-        >
-          <Plus className="w-5 h-5" /> Buat Payroll
-        </button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-text-muted text-xs">Total</p>
-          <p className="text-2xl font-bold">{stats.total}</p>
-        </div>
-        <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-text-muted text-xs">Draft</p>
-          <p className="text-2xl font-bold text-warning">{stats.draft}</p>
-        </div>
-        <div className="bg-surface rounded-xl border border-border p-4">
-          <p className="text-text-muted text-xs">Posted</p>
-          <p className="text-2xl font-bold text-success">{stats.posted}</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={copyFromPreviousMonth}
+            disabled={isLoadingPrevious}
+            className="flex items-center gap-2 px-4 py-2.5 border border-border rounded-lg hover:bg-background transition-colors disabled:opacity-50"
+          >
+            <Copy className="w-4 h-4" />
+            Copy Previous Month
+          </button>
+          <button
+            onClick={addRow}
+            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium shadow-lg shadow-accent/30"
+          >
+            <Plus className="w-5 h-5" /> Tambah Baris
+          </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-surface rounded-xl border border-border p-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+      {/* Period & Controls */}
+      <div className="bg-surface rounded-xl border border-border p-4 flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Periode</label>
+          <input
+            type="month"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="px-4 py-2 border border-border rounded-lg bg-surface"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Cari</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
             <input
               type="text"
-              placeholder="Cari karyawan atau periode..."
+              placeholder="Cari karyawan..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg"
+              className="pl-9 pr-4 py-2 border border-border rounded-lg bg-surface"
             />
           </div>
-          <div className="flex gap-2">
-            {['all', 'draft', 'posted'].map(s => (
-              <button
-                key={s}
-                onClick={() => setFilterStatus(s)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${
-                  filterStatus === s
-                    ? 'bg-accent text-white'
-                    : 'border border-border hover:bg-background'
-                }`}
-              >
-                {s === 'all' ? 'Semua' : s}
-              </button>
-            ))}
-          </div>
         </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Status</label>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 border border-border rounded-lg bg-surface"
+          >
+            <option value="all">Semua</option>
+            <option value="draft">Draft</option>
+            <option value="posted">Posted</option>
+          </select>
+        </div>
+        <div className="flex gap-2 ml-auto">
+          <button
+            onClick={saveAllRows}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-background transition-colors disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            {saving ? 'Menyimpan...' : 'Simpan Semua'}
+          </button>
+          <button
+            onClick={postAll}
+            disabled={postingAll || rows.filter(r => r.status === 'draft' && r.employee_name).length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-success text-white rounded-lg hover:bg-success/80 transition-colors disabled:opacity-50"
+          >
+            {postingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
+            Post All
+          </button>
+        </div>
+      </div>
+
+      {/* Total */}
+      <div className="bg-surface rounded-xl border border-border p-4">
+        <p className="text-sm text-text-muted">Total Gaji Bersih Periode Ini</p>
+        <p className="text-2xl font-bold text-accent">{formatCurrency(totalGaji)}</p>
       </div>
 
       {/* Table */}
       <div className="bg-surface rounded-xl border border-border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-background">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Karyawan</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-text-muted uppercase">Periode</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Gaji Pokok</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Gaji Bersih</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-text-muted uppercase">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {loading ? (
-                <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
-              ) : filteredPayrolls.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-8 text-text-muted">Belum ada data payroll</td></tr>
-              ) : (
-                filteredPayrolls.map((p) => (
-                  <tr key={p.id} className="hover:bg-background transition-colors">
-                    <td className="px-6 py-4 text-sm">{p.employee_name}</td>
-                    <td className="px-6 py-4 text-sm">{p.period.slice(0, 7)}</td>
-                    <td className="px-6 py-4 text-right font-mono">{formatCurrency(p.gaji_pokok)}</td>
-                    <td className="px-6 py-4 text-right font-mono font-bold">{formatCurrency(p.gaji_bersih)}</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${
-                        p.status === 'posted'
-                          ? 'bg-success/10 text-success'
-                          : 'bg-warning/10 text-warning'
+        {loading ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-background">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Nama</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Gaji Pokok</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">BPJS Kes</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">BPJS TK</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Tunjangan</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">PPh 21</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Gaji Bersih</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Bank</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-text-muted uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredRows.map((row, idx) => (
+                  <tr key={row.id || idx} className="hover:bg-background/50 transition-colors">
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        value={row.employee_name}
+                        onChange={(e) => updateRow(idx, 'employee_name', e.target.value)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent"
+                        placeholder="Nama karyawan"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.gaji_pokok}
+                        onChange={(e) => updateRow(idx, 'gaji_pokok', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {formatCurrency(row.bpjs_kesehatan)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {formatCurrency(row.bpjs_tk)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.tunjangan_lainnya}
+                        onChange={(e) => updateRow(idx, 'tunjangan_lainnya', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.pph21}
+                        onChange={(e) => updateRow(idx, 'pph21', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-bold">
+                      {formatCurrency(row.gaji_bersih)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={row.bank_account_id}
+                        onChange={(e) => updateRow(idx, 'bank_account_id', Number(e.target.value))}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-sm"
+                      >
+                        <option value={0}>-- Pilih --</option>
+                        {bankAccounts.map(b => (
+                          <option key={b.id} value={b.id}>{b.code}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                        row.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
                       }`}>
-                        {p.status === 'posted' ? 'Posted' : 'Draft'}
+                        {row.status === 'posted' ? 'Posted' : 'Draft'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {p.status === 'draft' && (
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {row.status === 'draft' && (
                           <>
                             <button
-                              onClick={() => handleEdit(p)}
-                              className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"
-                              title="Edit"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openOvertimeModal(p.id)}
-                              className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"
+                              onClick={() => openOvertimeModal(row.id!, row.employee_name)}
+                              className="p-1.5 text-text-muted hover:text-warning hover:bg-warning/10 rounded"
                               title="Tambah Lemburan"
                             >
                               <Clock className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => handlePost(p.id)}
-                              disabled={submitting}
-                              className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg disabled:opacity-50"
-                              title="Post"
-                            >
-                              <Send className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(p.id)}
-                              className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg"
+                              onClick={() => deleteRow(idx)}
+                              className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded"
                               title="Hapus"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </>
                         )}
-                        {p.status === 'posted' && p.journal_id && (
+                        {row.status === 'posted' && row.journal_id && (
                           <button
-                            onClick={() => navigate(`/journal-entries/${p.journal_id}`)}
-                            className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"
+                            onClick={() => navigate(`/journal-entries/${row.journal_id}`)}
+                            className="p-1.5 text-text-muted hover:text-info hover:bg-info/10 rounded"
                             title="Lihat Jurnal"
                           >
                             <Eye className="w-4 h-4" />
@@ -602,163 +987,99 @@ export default function Payroll() {
                       </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+                {filteredRows.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="text-center py-8 text-text-muted">
+                      Belum ada data payroll untuk periode ini.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Modal Form Gaji */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-surface rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-display text-xl font-bold">
-                {editingId ? 'Edit Payroll' : 'Buat Payroll Baru'}
-              </h2>
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="text-text-muted hover:text-text"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {/* Nama Karyawan - Manual Input */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Nama Karyawan *</label>
-                <input
-                  type="text"
-                  value={formData.employee_name}
-                  onChange={(e) => setFormData({ ...formData, employee_name: e.target.value })}
-                  placeholder="Masukkan nama karyawan"
-                  className="w-full px-4 py-2 border rounded-lg"
-                />
-              </div>
-
-              {/* Periode */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Periode</label>
-                <input
-                  type="month"
-                  value={formData.period}
-                  onChange={(e) => setFormData({ ...formData, period: e.target.value })}
-                  className="w-full px-4 py-2 border rounded-lg"
-                />
-              </div>
-
-              {/* Gaji Pokok */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Gaji Pokok (UMR)</label>
-                <input
-                  type="number"
-                  value={formData.gaji_pokok}
-                  onChange={(e) => setFormData({ ...formData, gaji_pokok: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border rounded-lg"
-                />
-                <p className="text-xs text-text-muted mt-1">UMR Tangsel 2026: Rp 5.247.870 (bisa diubah)</p>
-              </div>
-
-              {/* BPJS Kesehatan */}
-              <div>
-                <label className="block text-sm font-medium mb-1">BPJS Kesehatan (5%)</label>
-                <input
-                  type="number"
-                  value={formData.bpjs_kesehatan}
-                  onChange={(e) => setFormData({ ...formData, bpjs_kesehatan: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border rounded-lg bg-gray-50"
-                />
-                <p className="text-xs text-text-muted mt-1">Otomatis 5% dari Gaji Pokok, bisa diubah</p>
-              </div>
-
-              {/* BPJS TK */}
-              <div>
-                <label className="block text-sm font-medium mb-1">BPJS Ketenagakerjaan (9.24%)</label>
-                <input
-                  type="number"
-                  value={formData.bpjs_tk}
-                  onChange={(e) => setFormData({ ...formData, bpjs_tk: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border rounded-lg bg-gray-50"
-                />
-                <p className="text-xs text-text-muted mt-1">Otomatis 9.24% dari Gaji Pokok, bisa diubah</p>
-              </div>
-
-              {/* Tunjangan Lainnya */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Tunjangan Lainnya</label>
-                <input
-                  type="number"
-                  value={formData.tunjangan_lainnya}
-                  onChange={(e) => setFormData({ ...formData, tunjangan_lainnya: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border rounded-lg"
-                />
-              </div>
-
-              {/* PPh 21 */}
-              <div>
-                <label className="block text-sm font-medium mb-1">PPh 21 (Kosongkan jika tidak ada)</label>
-                <input
-                  type="number"
-                  value={formData.pph21}
-                  onChange={(e) => setFormData({ ...formData, pph21: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border rounded-lg"
-                />
-                <p className="text-xs text-text-muted mt-1">Input manual jika ada PPh 21</p>
-              </div>
-
-              {/* Gaji Bersih - Read Only */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Gaji Bersih (Diterima Karyawan)</label>
-                <input
-                  type="text"
-                  value={formatCurrency(formData.gaji_pokok + formData.tunjangan_lainnya)}
-                  readOnly
-                  className="w-full px-4 py-2 border rounded-lg bg-gray-100 font-semibold"
-                />
-                <p className="text-xs text-text-muted mt-1">Otomatis: Gaji Pokok + Tunjangan Lainnya</p>
-              </div>
-
-              {/* Pilih Bank */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Akun Bank / Kas *</label>
-                <select
-                  value={formData.bank_account_id}
-                  onChange={(e) => setFormData({ ...formData, bank_account_id: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2 border rounded-lg"
-                >
-                  <option value={0}>-- Pilih Bank / Kas --</option>
-                  {bankAccounts.map(b => (
-                    <option key={b.id} value={b.id}>{b.code} - {b.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="px-4 py-2 border border-border rounded-lg"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-accent text-white rounded-lg"
-              >
-                {editingId ? 'Update' : 'Simpan'}
-              </button>
-            </div>
-          </motion.div>
+      {/* Overtime Table */}
+      {overtimes.length > 0 && (
+        <div className="bg-surface rounded-xl border border-border overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-background/50">
+            <h3 className="font-semibold text-text">📋 Lemburan</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-background">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Karyawan</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Deskripsi</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-text-muted uppercase">Jumlah</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-text-muted uppercase">Bank</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-text-muted uppercase">Status</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-text-muted uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {overtimes.map(ot => {
+                  const row = rows.find(r => r.id === ot.payroll_id);
+                  const bank = bankAccounts.find(b => b.id === ot.bank_account_id);
+                  return (
+                    <tr key={ot.id} className="hover:bg-background/50">
+                      <td className="px-3 py-2 text-sm">{row?.employee_name || '-'}</td>
+                      <td className="px-3 py-2 text-sm">{ot.description}</td>
+                      <td className="px-3 py-2 text-right font-mono">{formatCurrency(ot.amount)}</td>
+                      <td className="px-3 py-2 text-sm">{bank?.code || '-'}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                          ot.status === 'posted' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+                        }`}>
+                          {ot.status === 'posted' ? 'Posted' : 'Draft'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          {ot.status === 'draft' && (
+                            <>
+                              <button
+                                onClick={() => editOvertime(ot)}
+                                className="p-1.5 text-text-muted hover:text-info hover:bg-info/10 rounded"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => postOvertime(ot.id)}
+                                className="p-1.5 text-text-muted hover:text-success hover:bg-success/10 rounded"
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => deleteOvertime(ot.id)}
+                                className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                          {ot.status === 'posted' && ot.journal_id && (
+                            <button
+                              onClick={() => navigate(`/journal-entries/${ot.journal_id}`)}
+                              className="p-1.5 text-text-muted hover:text-info hover:bg-info/10 rounded"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Modal Lemburan */}
+      {/* Overtime Modal */}
       {showOvertimeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <motion.div
@@ -767,23 +1088,33 @@ export default function Payroll() {
             className="bg-surface rounded-xl p-6 w-full max-w-lg"
           >
             <div className="flex justify-between items-center mb-4">
-              <h2 className="font-display text-xl font-bold">Tambah Lemburan</h2>
+              <h2 className="font-display text-xl font-bold">
+                {editingOvertimeId ? 'Edit Lemburan' : 'Tambah Lemburan'}
+              </h2>
               <button
-                onClick={() => { setShowOvertimeModal(false); setOvertimeData({ payroll_id: 0, amount: 0, description: '', bank_account_id: 0 }); }}
+                onClick={() => setShowOvertimeModal(false)}
                 className="text-text-muted hover:text-text"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
-
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Karyawan</label>
+                <input
+                  type="text"
+                  value={selectedPayrollName}
+                  disabled
+                  className="w-full px-4 py-2 border rounded-lg bg-gray-50"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Deskripsi *</label>
                 <input
                   type="text"
-                  value={overtimeData.description}
-                  onChange={(e) => setOvertimeData({ ...overtimeData, description: e.target.value })}
-                  placeholder="Misal: Lemburan Hari Minggu"
+                  value={overtimeForm.description}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, description: e.target.value })}
+                  placeholder="Misal: Lembur Minggu"
                   className="w-full px-4 py-2 border rounded-lg"
                 />
               </div>
@@ -791,39 +1122,38 @@ export default function Payroll() {
                 <label className="block text-sm font-medium mb-1">Jumlah *</label>
                 <input
                   type="number"
-                  value={overtimeData.amount}
-                  onChange={(e) => setOvertimeData({ ...overtimeData, amount: parseInt(e.target.value) || 0 })}
+                  value={overtimeForm.amount}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, amount: Number(e.target.value) || 0 })}
                   className="w-full px-4 py-2 border rounded-lg"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Akun Bank / Kas *</label>
                 <select
-                  value={overtimeData.bank_account_id}
-                  onChange={(e) => setOvertimeData({ ...overtimeData, bank_account_id: parseInt(e.target.value) })}
+                  value={overtimeForm.bank_account_id}
+                  onChange={(e) => setOvertimeForm({ ...overtimeForm, bank_account_id: Number(e.target.value) })}
                   className="w-full px-4 py-2 border rounded-lg"
                 >
-                  <option value={0}>-- Pilih Bank / Kas --</option>
+                  <option value={0}>-- Pilih --</option>
                   {bankAccounts.map(b => (
                     <option key={b.id} value={b.id}>{b.code} - {b.name}</option>
                   ))}
                 </select>
               </div>
-              <p className="text-xs text-text-muted">Jurnal: Debit Beban Survei Lokasi, Kredit Bank/Kas</p>
+              <p className="text-xs text-text-muted">Jurnal: Debit Beban, Kredit Bank/Kas</p>
             </div>
-
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => { setShowOvertimeModal(false); setOvertimeData({ payroll_id: 0, amount: 0, description: '', bank_account_id: 0 }); }}
+                onClick={() => setShowOvertimeModal(false)}
                 className="px-4 py-2 border border-border rounded-lg"
               >
                 Batal
               </button>
               <button
-                onClick={handleAddOvertime}
+                onClick={saveOvertime}
                 className="px-4 py-2 bg-accent text-white rounded-lg"
               >
-                Simpan Lemburan
+                {editingOvertimeId ? 'Update' : 'Simpan'}
               </button>
             </div>
           </motion.div>

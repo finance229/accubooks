@@ -658,7 +658,8 @@ export const createProjectIfNotExist = async (
 };
 
 // ============================================
-// CREATE PAYROLL JOURNAL
+// ============================================
+// CREATE PAYROLL JOURNAL (UPDATED)
 // ============================================
 export const createPayrollJournal = async (
   companyId: number,
@@ -666,17 +667,17 @@ export const createPayrollJournal = async (
   createdBy: string = 'system'
 ): Promise<number | null> => {
   try {
-    // Cari COA untuk akun-akun payroll
+    // Mapping COA (pastikan semua ada)
     const coaMap: Record<string, string> = {
       beban_gaji_pokok: '5101',
       beban_tunjangan: '5102',
       beban_bpjs_kes: '5103',
       beban_bpjs_tk: '5104',
-      beban_pph21: '5105',
+      beban_tunjangan_pph21: '5106',   // 🔥 AKUN BARU
       utang_bpjs_kes: '2102',
       utang_bpjs_tk: '2103',
-      utang_pph21: '2103-01', // Utang PPh 21 (sudah ada)
-      kas: '1102-01', // Bank default
+      utang_pph21: '2103-01',
+      kas: '1102-01',
     };
 
     const getAccountId = async (code: string): Promise<number | null> => {
@@ -690,24 +691,6 @@ export const createPayrollJournal = async (
       return data?.id || null;
     };
 
-    // Ambil semua akun yang dibutuhkan
-    const bebanGajiPokokId = await getAccountId(coaMap.beban_gaji_pokok);
-    const bebanTunjanganId = await getAccountId(coaMap.beban_tunjangan);
-    const bebanBpjsKesId = await getAccountId(coaMap.beban_bpjs_kes);
-    const bebanBpjsTkId = await getAccountId(coaMap.beban_bpjs_tk);
-    const bebanPph21Id = await getAccountId(coaMap.beban_pph21);
-    const utangBpjsKesId = await getAccountId(coaMap.utang_bpjs_kes);
-    const utangBpjsTkId = await getAccountId(coaMap.utang_bpjs_tk);
-    const utangPph21Id = await getAccountId(coaMap.utang_pph21);
-    const kasId = await getAccountId(coaMap.kas);
-
-    if (!bebanGajiPokokId || !bebanTunjanganId || !bebanBpjsKesId || !bebanBpjsTkId ||
-        !utangBpjsKesId || !utangBpjsTkId || !kasId) {
-      console.error('❌ COA untuk payroll tidak lengkap');
-      return null;
-    }
-
-    // Ambil nama akun untuk journal_lines
     const getAccountDetails = async (id: number) => {
       const { data } = await supabase
         .from('coa')
@@ -717,14 +700,32 @@ export const createPayrollJournal = async (
       return data || { code: '', name: '' };
     };
 
+    // Ambil semua ID akun
+    const bebanGajiPokokId = await getAccountId(coaMap.beban_gaji_pokok);
+    const bebanTunjanganId = await getAccountId(coaMap.beban_tunjangan);
+    const bebanBpjsKesId = await getAccountId(coaMap.beban_bpjs_kes);
+    const bebanBpjsTkId = await getAccountId(coaMap.beban_bpjs_tk);
+    const bebanTunjanganPph21Id = await getAccountId(coaMap.beban_tunjangan_pph21);
+    const utangBpjsKesId = await getAccountId(coaMap.utang_bpjs_kes);
+    const utangBpjsTkId = await getAccountId(coaMap.utang_bpjs_tk);
+    const utangPph21Id = await getAccountId(coaMap.utang_pph21);
+    const kasId = await getAccountId(coaMap.kas);
+
+    if (!bebanGajiPokokId || !bebanTunjanganId || !bebanBpjsKesId || !bebanBpjsTkId ||
+        !bebanTunjanganPph21Id || !utangBpjsKesId || !utangBpjsTkId || !utangPph21Id || !kasId) {
+      console.error('❌ COA untuk payroll tidak lengkap');
+      return null;
+    }
+
+    // Ambil nama akun
     const debitAcc = await getAccountDetails(bebanGajiPokokId);
     const tunjanganAcc = await getAccountDetails(bebanTunjanganId);
     const bpjsKesAcc = await getAccountDetails(bebanBpjsKesId);
     const bpjsTkAcc = await getAccountDetails(bebanBpjsTkId);
-    const pph21Acc = await getAccountDetails(bebanPph21Id || 0);
+    const tunjanganPph21Acc = await getAccountDetails(bebanTunjanganPph21Id);
     const utangBpjsKesAcc = await getAccountDetails(utangBpjsKesId);
     const utangBpjsTkAcc = await getAccountDetails(utangBpjsTkId);
-    const utangPph21Acc = await getAccountDetails(utangPph21Id || 0);
+    const utangPph21Acc = await getAccountDetails(utangPph21Id);
     const kasAcc = await getAccountDetails(kasId);
 
     // ========== BUAT ENTRIES JURNAL ==========
@@ -772,13 +773,13 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 5. Debit Beban PPh 21 (jika ada)
-    if (payroll.pph21 > 0 && bebanPph21Id && utangPph21Id) {
+    // 5. 🔥 Debit Beban Tunjangan PPh 21 (Deductible)
+    if (payroll.tunjangan_pph21 > 0) {
       entries.push({
-        account_id: bebanPph21Id,
-        account_code: pph21Acc.code,
-        account_name: pph21Acc.name,
-        debit: payroll.pph21,
+        account_id: bebanTunjanganPph21Id,
+        account_code: tunjanganPph21Acc.code,
+        account_name: tunjanganPph21Acc.name,
+        debit: payroll.tunjangan_pph21,
         credit: 0,
       });
     }
@@ -814,14 +815,14 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 9. Kredit Utang PPh 21 (jika ada)
-    if (payroll.pph21 > 0 && utangPph21Id) {
+    // 9. 🔥 Kredit Utang PPh 21 (Potongan PPh 21)
+    if (payroll.potongan_pph21 > 0) {
       entries.push({
         account_id: utangPph21Id,
         account_code: utangPph21Acc.code,
         account_name: utangPph21Acc.name,
         debit: 0,
-        credit: payroll.pph21,
+        credit: payroll.potongan_pph21,
       });
     }
 

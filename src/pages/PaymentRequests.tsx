@@ -64,7 +64,7 @@ export default function PaymentRequests() {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
-  
+
   // State untuk Edit
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingRequest, setEditingRequest] = useState<PaymentRequest | null>(null);
@@ -82,10 +82,10 @@ export default function PaymentRequests() {
   const [companyCode, setCompanyCode] = useState<string>('');
   const [voucherPreview, setVoucherPreview] = useState<string>('');
   const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
-  
+
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
-  
+
   const [newRequest, setNewRequest] = useState({
     description: '',
     amount: '',
@@ -255,6 +255,9 @@ export default function PaymentRequests() {
     }
   };
 
+  // ============================================================
+  // HANDLE ADD REQUEST dengan MAX + 1 (tanpa RPC)
+  // ============================================================
   const handleAddRequest = async () => {
     if (!newRequest.description || !newRequest.amount) {
       alert('Lengkapi deskripsi dan jumlah');
@@ -267,6 +270,7 @@ export default function PaymentRequests() {
 
     setUploading(true);
 
+    // 1. Upload file ke Google Drive
     const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
     if (!uploadResult.success) {
       alert('Gagal upload bukti: ' + uploadResult.error);
@@ -275,17 +279,33 @@ export default function PaymentRequests() {
     }
 
     const year = new Date().getFullYear();
-    const { data: requestNumber, error: seqError } = await supabase.rpc(
-      'generate_pr_number',
-      { p_company_id: currentCompany!.id, p_year: year }
-    );
+    const prefix = `PR/${year}/`;
 
-    if (seqError || !requestNumber) {
-      alert('Gagal generate nomor request: ' + seqError?.message);
+    // 2. Ambil nomor terakhir untuk company ini & tahun ini
+    const { data: maxData, error: maxError } = await supabase
+      .from('payment_requests')
+      .select('request_number')
+      .eq('company_id', currentCompany!.id)
+      .ilike('request_number', `${prefix}%`)
+      .order('request_number', { ascending: false })
+      .limit(1);
+
+    if (maxError) {
+      alert('Gagal membaca nomor terakhir: ' + maxError.message);
       setUploading(false);
       return;
     }
 
+    let lastNumber = 0;
+    if (maxData && maxData.length > 0) {
+      const parts = maxData[0].request_number.split('/');
+      const lastPart = parts[parts.length - 1];
+      lastNumber = parseInt(lastPart) || 0;
+    }
+    const nextNumber = (lastNumber + 1).toString().padStart(4, '0');
+    const requestNumber = `${prefix}${nextNumber}`;
+
+    // 3. Insert
     const { data, error } = await supabase
       .from('payment_requests')
       .insert([{
@@ -303,6 +323,63 @@ export default function PaymentRequests() {
         status: 'draft',
       }])
       .select();
+
+    // 4. Jika duplicate (karena race condition), retry sekali
+    if (error && error.code === '23505') {
+      // Ambil ulang MAX
+      const { data: retryMax } = await supabase
+        .from('payment_requests')
+        .select('request_number')
+        .eq('company_id', currentCompany!.id)
+        .ilike('request_number', `${prefix}%`)
+        .order('request_number', { ascending: false })
+        .limit(1);
+      let retryLast = 0;
+      if (retryMax && retryMax.length > 0) {
+        const parts = retryMax[0].request_number.split('/');
+        retryLast = parseInt(parts[parts.length - 1]) || 0;
+      }
+      const retryNumber = (retryLast + 1).toString().padStart(4, '0');
+      const retryRequestNumber = `${prefix}${retryNumber}`;
+
+      const { data: retryData, error: retryError } = await supabase
+        .from('payment_requests')
+        .insert([{
+          company_id: currentCompany!.id,
+          request_number: retryRequestNumber,
+          request_date: newRequest.request_date,
+          requester_name: user?.name || user?.email || 'Staff',
+          requester_email: user?.email,
+          description: newRequest.description,
+          amount: parseInt(newRequest.amount) || 0,
+          bank_name: newRequest.bank_name,
+          bank_account_number: newRequest.bank_account_number,
+          bank_account_name: newRequest.bank_account_name,
+          attachment_url: uploadResult.fileUrl,
+          status: 'draft',
+        }])
+        .select();
+
+      if (!retryError && retryData) {
+        setRequests([retryData[0], ...requests]);
+        setShowAddModal(false);
+        setNewRequest({
+          description: '',
+          amount: '',
+          request_date: new Date().toISOString().split('T')[0],
+          bank_name: '',
+          bank_account_number: '',
+          bank_account_name: '',
+        });
+        setAttachmentFile(null);
+        setUploading(false);
+        return;
+      } else {
+        alert('Gagal simpan setelah percobaan ulang: ' + (retryError?.message || 'unknown'));
+        setUploading(false);
+        return;
+      }
+    }
 
     if (!error && data) {
       setRequests([data[0], ...requests]);
@@ -322,9 +399,9 @@ export default function PaymentRequests() {
     setUploading(false);
   };
 
-  // ============================================
-  // FUNGSI EDIT UNTUK DRAFT
-  // ============================================
+  // ============================================================
+  // EDIT (hanya untuk draft)
+  // ============================================================
   const openEditModal = (request: PaymentRequest) => {
     if (request.status !== 'draft') {
       alert('Hanya request dengan status DRAFT yang bisa diedit');
@@ -455,7 +532,6 @@ export default function PaymentRequests() {
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const project = projects.find(p => p.id === verifyData.projectId);
     const projectCode = project?.code || '';
-
     const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
     const voucherCode = await generateVoucherNumber(currentCompany!.id, basePattern);
 
@@ -508,7 +584,6 @@ export default function PaymentRequests() {
   const handleApprove = async (id: number) => {
     const request = requests.find(r => r.id === id);
     if (!request) return;
-
     const bankAccountId = request.payment_account_id || request.credit_account_id;
     if (!bankAccountId) {
       alert('Akun pembayaran belum dipilih saat verifikasi');
@@ -674,7 +749,7 @@ export default function PaymentRequests() {
         </div>
       )}
 
-      {/* Modal Edit untuk Draft */}
+      {/* Modal Edit */}
       {showEditModal && editingRequest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">

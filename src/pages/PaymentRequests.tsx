@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, CheckCircle, XCircle, Clock, AlertCircle, UserCheck, Award, Upload, X, FolderOpen, Coins, Banknote, FileText } from 'lucide-react';
+import { Plus, Search, Eye, Send, CheckCircle, XCircle, Clock, AlertCircle, UserCheck, Award, Upload, X, FolderOpen, Coins, Banknote, FileText, Edit } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -39,8 +39,8 @@ type PaymentRequest = {
   voucher_no: string | null;
   attachment_url: string | null;
   debit_account_id: number | null;
-  credit_account_id: number | null;  // 🔥 AKUN UTANG
-  payment_account_id: number | null; // 🔥 TAMBAHKAN: AKUN BANK/KAS
+  credit_account_id: number | null;
+  payment_account_id: number | null;
   ppn: number;
   pph: number;
   total_with_tax: number;
@@ -65,6 +65,20 @@ export default function PaymentRequests() {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   
+  // State untuk Edit
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<PaymentRequest | null>(null);
+  const [editData, setEditData] = useState({
+    description: '',
+    amount: '',
+    request_date: '',
+    bank_name: '',
+    bank_account_number: '',
+    bank_account_name: '',
+  });
+  const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
+  const [editUploading, setEditUploading] = useState(false);
+
   const [companyCode, setCompanyCode] = useState<string>('');
   const [voucherPreview, setVoucherPreview] = useState<string>('');
   const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
@@ -83,15 +97,14 @@ export default function PaymentRequests() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // 🔥 VERIFY DATA - TAMBAHKAN paymentAccountId
   const [verifyData, setVerifyData] = useState({
     projectId: 0,
     newProjectCode: '',
     newProjectName: '',
     newProjectBudget: 0,
     debitAccountId: 0,
-    creditAccountId: 0,   // 🔥 UTANG
-    paymentAccountId: 0,  // 🔥 TAMBAHKAN: BANK/KAS
+    creditAccountId: 0,
+    paymentAccountId: 0,
     ppn: 0,
     pph: 0,
     total: 0,
@@ -108,51 +121,35 @@ export default function PaymentRequests() {
     }
   }, [currentCompany]);
 
-  // ============================================
-  // FETCH COMPANY CODE
-  // ============================================
   const fetchCompanyCode = async () => {
-    if (!currentCompany?.id) {
-      console.log('⚠️ No company ID');
-      return;
-    }
-    
+    if (!currentCompany?.id) return;
     try {
       const { data, error } = await supabase
         .from('companies')
         .select('*')
         .eq('id', currentCompany.id)
         .single();
-      
       if (error) {
-        console.error('❌ Error fetching company:', error);
+        console.error('Error fetching company:', error);
         return;
       }
-      
       const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
-      console.log('✅ Company Code:', code);
       setCompanyCode(code);
     } catch (err) {
-      console.error('❌ Fetch error:', err);
+      console.error('Fetch error:', err);
     }
   };
 
-  // ============================================
-  // GENERATE PREVIEW VOUCHER
-  // ============================================
   const generateVoucherPreview = async () => {
     if (!currentCompany?.id || !companyCode) {
       setVoucherPreview('');
       return;
     }
-
     setIsGeneratingPreview(true);
-
     try {
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
-      
       const projectId = verifyData.projectId;
       const project = projects.find(p => p.id === projectId);
       const projectCode = project?.code || '';
@@ -175,13 +172,10 @@ export default function PaymentRequests() {
         const lastPart = parts[parts.length - 1];
         lastNumber = parseInt(lastPart) || 0;
       }
-
       const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-      const preview = `${basePattern}/${nextNumber}`;
-      
-      setVoucherPreview(preview);
+      setVoucherPreview(`${basePattern}/${nextNumber}`);
     } catch (error) {
-      console.error('❌ Error generating preview:', error);
+      console.error('Error generating preview:', error);
       setVoucherPreview('(gagal generate)');
     } finally {
       setIsGeneratingPreview(false);
@@ -194,9 +188,6 @@ export default function PaymentRequests() {
     }
   }, [companyCode, verifyData.projectId, projects]);
 
-  // ============================================
-  // DATA FETCHING
-  // ============================================
   const fetchRequests = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
@@ -231,21 +222,17 @@ export default function PaymentRequests() {
   };
 
   const fetchBankAccounts = async () => {
-  if (!currentCompany?.id) return;
-  
-  const { data } = await supabase
-    .from('coa')
-    .select('id, code, name')
-    .eq('company_id', currentCompany.id)
-    .eq('is_active', true)
-    .or('name.ilike.%bank%,name.ilike.%kas%')  // 🔥 PAKE KOMA
-    .order('code');
-  
-  console.log('🏦 Bank Accounts found:', data?.length);
-  setBankAccounts(data || []);
-}; // ============================================
-  // CREATE PROJECT
-  // ============================================
+    if (!currentCompany?.id) return;
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', currentCompany.id)
+      .eq('is_active', true)
+      .or('name.ilike.%bank%,name.ilike.%kas%')
+      .order('code');
+    setBankAccounts(data || []);
+  };
+
   const handleCreateProject = async () => {
     if (!newProject.code || !newProject.name) {
       alert('Kode dan nama proyek wajib diisi');
@@ -268,85 +255,139 @@ export default function PaymentRequests() {
     }
   };
 
-  // ============================================
-  // CREATE PAYMENT REQUEST
-  // ============================================
   const handleAddRequest = async () => {
-  // Validasi input
-  if (!newRequest.description || !newRequest.amount) {
-    alert('Lengkapi deskripsi dan jumlah');
-    return;
-  }
-  if (!attachmentFile) {
-    alert('Upload bukti pendukung (foto/PDF) wajib');
-    return;
-  }
+    if (!newRequest.description || !newRequest.amount) {
+      alert('Lengkapi deskripsi dan jumlah');
+      return;
+    }
+    if (!attachmentFile) {
+      alert('Upload bukti pendukung (foto/PDF) wajib');
+      return;
+    }
 
-  setUploading(true);
+    setUploading(true);
 
-  // 1. Upload file ke Google Drive
-  const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
-  if (!uploadResult.success) {
-    alert('Gagal upload bukti: ' + uploadResult.error);
+    const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
+    if (!uploadResult.success) {
+      alert('Gagal upload bukti: ' + uploadResult.error);
+      setUploading(false);
+      return;
+    }
+
+    const year = new Date().getFullYear();
+    const { data: requestNumber, error: seqError } = await supabase.rpc(
+      'generate_pr_number',
+      { p_company_id: currentCompany!.id, p_year: year }
+    );
+
+    if (seqError || !requestNumber) {
+      alert('Gagal generate nomor request: ' + seqError?.message);
+      setUploading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .insert([{
+        company_id: currentCompany!.id,
+        request_number: requestNumber,
+        request_date: newRequest.request_date,
+        requester_name: user?.name || user?.email || 'Staff',
+        requester_email: user?.email,
+        description: newRequest.description,
+        amount: parseInt(newRequest.amount) || 0,
+        bank_name: newRequest.bank_name,
+        bank_account_number: newRequest.bank_account_number,
+        bank_account_name: newRequest.bank_account_name,
+        attachment_url: uploadResult.fileUrl,
+        status: 'draft',
+      }])
+      .select();
+
+    if (!error && data) {
+      setRequests([data[0], ...requests]);
+      setShowAddModal(false);
+      setNewRequest({
+        description: '',
+        amount: '',
+        request_date: new Date().toISOString().split('T')[0],
+        bank_name: '',
+        bank_account_number: '',
+        bank_account_name: '',
+      });
+      setAttachmentFile(null);
+    } else {
+      alert('Gagal simpan: ' + error?.message);
+    }
     setUploading(false);
-    return;
-  }
+  };
 
-  // 2. Generate nomor request dari DATABASE (AMAN)
-  const year = new Date().getFullYear();
- const { data: requestNumber, error: seqError } = await supabase.rpc(
-  'generate_pr_number',   // <-- nama fungsi baru
-  { p_company_id: currentCompany!.id, p_year: year }
-);
-
-  if (seqError || !requestNumber) {
-    alert('Gagal generate nomor request: ' + seqError?.message);
-    setUploading(false);
-    return;
-  }
-
-  // 3. Insert ke database dengan nomor yang sudah di-generate
-  const { data, error } = await supabase
-    .from('payment_requests')
-    .insert([{
-      company_id: currentCompany!.id,
-      request_number: requestNumber,            // 🔥 PAKAI HASIL RPC
-      request_date: newRequest.request_date,
-      requester_name: user?.name || user?.email || 'Staff',
-      requester_email: user?.email,
-      description: newRequest.description,
-      amount: parseInt(newRequest.amount) || 0,
-      bank_name: newRequest.bank_name,
-      bank_account_number: newRequest.bank_account_number,
-      bank_account_name: newRequest.bank_account_name,
-      attachment_url: uploadResult.fileUrl,
-      status: 'draft',
-    }])
-    .select();
-
-  // 4. Handle response
-  if (!error && data) {
-    setRequests([data[0], ...requests]);
-    setShowAddModal(false);
-    setNewRequest({
-      description: '',
-      amount: '',
-      request_date: new Date().toISOString().split('T')[0],
-      bank_name: '',
-      bank_account_number: '',
-      bank_account_name: '',
+  // ============================================
+  // FUNGSI EDIT UNTUK DRAFT
+  // ============================================
+  const openEditModal = (request: PaymentRequest) => {
+    if (request.status !== 'draft') {
+      alert('Hanya request dengan status DRAFT yang bisa diedit');
+      return;
+    }
+    setEditingRequest(request);
+    setEditData({
+      description: request.description,
+      amount: request.amount.toString(),
+      request_date: request.request_date,
+      bank_name: request.bank_name || '',
+      bank_account_number: request.bank_account_number || '',
+      bank_account_name: request.bank_account_name || '',
     });
-    setAttachmentFile(null);
-  } else {
-    alert('Gagal simpan: ' + error?.message);
-  }
+    setEditAttachmentFile(null);
+    setShowEditModal(true);
+  };
 
-  setUploading(false);
-};
+  const handleEditRequest = async () => {
+    if (!editingRequest) return;
+    if (!editData.description || !editData.amount) {
+      alert('Lengkapi deskripsi dan jumlah');
+      return;
+    }
 
-  // ============================================
-  // SUBMIT PAYMENT REQUEST
-  // ============================================
+    setEditUploading(true);
+
+    let attachmentUrl = editingRequest.attachment_url;
+    if (editAttachmentFile) {
+      const uploadResult = await uploadToGoogleDrive(editAttachmentFile, 'payment_requests');
+      if (!uploadResult.success) {
+        alert('Gagal upload bukti baru: ' + uploadResult.error);
+        setEditUploading(false);
+        return;
+      }
+      attachmentUrl = uploadResult.fileUrl;
+    }
+
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({
+        description: editData.description,
+        amount: parseInt(editData.amount) || 0,
+        request_date: editData.request_date,
+        bank_name: editData.bank_name,
+        bank_account_number: editData.bank_account_number,
+        bank_account_name: editData.bank_account_name,
+        attachment_url: attachmentUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', editingRequest.id);
+
+    if (!error) {
+      await addPaymentLog(editingRequest.id, 'draft', 'draft', 'Data request diedit');
+      fetchRequests();
+      setShowEditModal(false);
+      setEditingRequest(null);
+    } else {
+      alert('Gagal update: ' + error.message);
+    }
+    setEditUploading(false);
+  };
+
   const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('payment_requests')
@@ -358,9 +399,6 @@ export default function PaymentRequests() {
     } else alert('Gagal submit');
   };
 
-  // ============================================
-  // OPEN VERIFY MODAL
-  // ============================================
   const openVerifyModal = (request: PaymentRequest) => {
     setSelectedRequest(request);
     setVerifyData({
@@ -370,7 +408,7 @@ export default function PaymentRequests() {
       newProjectBudget: 0,
       debitAccountId: request.debit_account_id || 0,
       creditAccountId: request.credit_account_id || 0,
-      paymentAccountId: request.payment_account_id || 0, // 🔥 TAMBAHKAN
+      paymentAccountId: request.payment_account_id || 0,
       ppn: request.ppn || 0,
       pph: request.pph || 0,
       total: request.amount,
@@ -379,9 +417,6 @@ export default function PaymentRequests() {
     setShowVerifyModal(true);
   };
 
-  // ============================================
-  // PROJECT CHANGE
-  // ============================================
   const handleProjectChange = async (projectId: number) => {
     setVerifyData({ ...verifyData, projectId });
     if (projectId > 0 && selectedRequest) {
@@ -393,9 +428,6 @@ export default function PaymentRequests() {
     } else setBudgetInfo(null);
   };
 
-  // ============================================
-  // HANDLE VERIFY
-  // ============================================
   const handleVerify = async () => {
     if (!selectedRequest) return;
     if (!verifyData.projectId) {
@@ -410,33 +442,25 @@ export default function PaymentRequests() {
       alert('Pilih akun pembayaran (Bank/Kas)');
       return;
     }
-   // 🔥 SKIP BUDGET CHECK KALAU BUDGET = 0 (UNLIMITED)
-if (budgetInfo && !budgetInfo.sufficient && budgetInfo.budget !== 0) {
-  alert('Budget tidak cukup. Tidak bisa verifikasi.');
-  return;
-}
+    if (budgetInfo && !budgetInfo.sufficient && budgetInfo.budget !== 0) {
+      alert('Budget tidak cukup. Tidak bisa verifikasi.');
+      return;
+    }
 
     const request = selectedRequest;
     const totalAmount = request.amount + verifyData.ppn - verifyData.pph;
-    
-   // 🔥 GENERATE VOUCHER PAKE GLOBAL SEQUENCE
-const now = new Date();
-const year = now.getFullYear();
-const month = String(now.getMonth() + 1).padStart(2, '0');
-const project = projects.find(p => p.id === verifyData.projectId);
-const projectCode = project?.code || '';
 
-const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const project = projects.find(p => p.id === verifyData.projectId);
+    const projectCode = project?.code || '';
 
-// 🔥 PAKE generateVoucherNumber (GLOBAL SEQUENCE)
-const voucherCode = await generateVoucherNumber(
-  currentCompany!.id,
-  basePattern
-);
-    // Update project spent
+    const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
+    const voucherCode = await generateVoucherNumber(currentCompany!.id, basePattern);
+
     await updateProjectSpent(verifyData.projectId, request.amount);
 
-    // Buat jurnal accrual
     let journalId = null;
     try {
       journalId = await createAccrualJournal(
@@ -454,7 +478,6 @@ const voucherCode = await generateVoucherNumber(
       return;
     }
 
-    // Update payment request - 🔥 SIMPAN payment_account_id
     const { error } = await supabase
       .from('payment_requests')
       .update({
@@ -465,38 +488,33 @@ const voucherCode = await generateVoucherNumber(
         voucher_no: voucherCode,
         debit_account_id: verifyData.debitAccountId,
         credit_account_id: verifyData.creditAccountId,
-        payment_account_id: verifyData.paymentAccountId, // 🔥 TAMBAHKAN
+        payment_account_id: verifyData.paymentAccountId,
         ppn: verifyData.ppn,
         pph: verifyData.pph,
         total_with_tax: totalAmount,
       })
       .eq('id', request.id);
-      
+
     if (error) {
       alert('Gagal update: ' + error.message);
       return;
     }
-    
+
     await addPaymentLog(request.id, request.status, 'verified', `Voucher: ${voucherCode}, Jurnal accrual: ${journalId}`);
     fetchRequests();
     setShowVerifyModal(false);
   };
 
-  // ============================================
-  // HANDLE APPROVE - 🔥 PAKAI payment_account_id
-  // ============================================
   const handleApprove = async (id: number) => {
     const request = requests.find(r => r.id === id);
     if (!request) return;
-    
-    // 🔥 Ambil payment_account_id (akun bank/kas)
+
     const bankAccountId = request.payment_account_id || request.credit_account_id;
     if (!bankAccountId) {
       alert('Akun pembayaran belum dipilih saat verifikasi');
       return;
     }
-    
-    // 🔥 Buat jurnal pembayaran
+
     let journalId = null;
     try {
       journalId = await createPaymentJournal(
@@ -504,8 +522,8 @@ const voucherCode = await generateVoucherNumber(
         new Date().toISOString().split('T')[0],
         request.description,
         request.voucher_no || '',
-        request.credit_account_id,    // 🔥 Utang (Debit)
-        bankAccountId,                // 🔥 Bank/Kas (Kredit)
+        request.credit_account_id,
+        bankAccountId,
         request.total_with_tax || request.amount,
         request.project_id || undefined
       );
@@ -513,7 +531,7 @@ const voucherCode = await generateVoucherNumber(
       alert('Gagal membuat jurnal pembayaran: ' + (err as Error).message);
       return;
     }
-    
+
     const { error } = await supabase
       .from('payment_requests')
       .update({ status: 'approved', approved_by: user?.email, approved_at: new Date().toISOString() })
@@ -524,9 +542,6 @@ const voucherCode = await generateVoucherNumber(
     } else alert('Gagal approve');
   };
 
-  // ============================================
-  // FILTER & RENDER
-  // ============================================
   const filteredRequests = requests.filter(req => {
     const matchesSearch = req.request_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.description?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -573,7 +588,6 @@ const voucherCode = await generateVoucherNumber(
         </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[{ label: 'Total', value: stats.total },{ label: 'Draft', value: stats.draft },{ label: 'Submitted', value: stats.submitted },{ label: 'Verified', value: stats.verified },{ label: 'Approved', value: stats.approved }].map((stat, idx) => (
           <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }} className="bg-surface rounded-xl border border-border p-4">
@@ -583,7 +597,6 @@ const voucherCode = await generateVoucherNumber(
         ))}
       </div>
 
-      {/* Filters */}
       <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari request..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
@@ -591,7 +604,6 @@ const voucherCode = await generateVoucherNumber(
         </div>
       </div>
 
-      {/* Requests Table */}
       <div className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -621,11 +633,16 @@ const voucherCode = await generateVoucherNumber(
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
                           <button onClick={() => { setSelectedRequest(req); setShowDetailModal(true); }} className="p-1 text-blue-600"><Eye className="w-4 h-4" /></button>
-                          {req.status === 'draft' && <button onClick={() => handleSubmit(req.id)} className="p-1 text-green-600"><Send className="w-4 h-4" /></button>}
+                          {req.status === 'draft' && (
+                            <>
+                              <button onClick={() => openEditModal(req)} className="p-1 text-indigo-600"><Edit className="w-4 h-4" /></button>
+                              <button onClick={() => handleSubmit(req.id)} className="p-1 text-green-600"><Send className="w-4 h-4" /></button>
+                            </>
+                          )}
                           {req.status === 'submitted' && <button onClick={() => openVerifyModal(req)} className="p-1 text-yellow-600"><UserCheck className="w-4 h-4" /></button>}
                           {req.status === 'verified' && <button onClick={() => handleApprove(req.id)} className="p-1 text-red-600"><Award className="w-4 h-4" /></button>}
                         </div>
-                       </td>
+                      </td>
                     </tr>
                   );
                 })
@@ -642,10 +659,7 @@ const voucherCode = await generateVoucherNumber(
             <h2 className="font-display text-xl font-bold mb-4">Buat Payment Request</h2>
             <div className="space-y-4">
               <textarea placeholder="Deskripsi *" rows={3} value={newRequest.description} onChange={e => setNewRequest({...newRequest, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
-              <input type="text" placeholder="Jumlah (Rp) *" value={newRequest.amount} onChange={e => {
-                const raw = e.target.value.replace(/\./g, '');
-                if (/^\d*$/.test(raw)) setNewRequest({...newRequest, amount: raw});
-              }} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Jumlah (Rp) *" value={newRequest.amount} onChange={e => { const raw = e.target.value.replace(/\./g, ''); if (/^\d*$/.test(raw)) setNewRequest({...newRequest, amount: raw}); }} className="w-full px-4 py-2 border rounded-lg" />
               <input type="text" placeholder="Nama Bank" value={newRequest.bank_name} onChange={e => setNewRequest({...newRequest, bank_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
               <input type="text" placeholder="Nomor Rekening" value={newRequest.bank_account_number} onChange={e => setNewRequest({...newRequest, bank_account_number: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
               <input type="text" placeholder="Atas Nama" value={newRequest.bank_account_name} onChange={e => setNewRequest({...newRequest, bank_account_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
@@ -660,7 +674,37 @@ const voucherCode = await generateVoucherNumber(
         </div>
       )}
 
-      {/* Modal Verifikasi - 🔥 TAMBAHKAN DROPDOWN AKUN PEMBAYARAN */}
+      {/* Modal Edit untuk Draft */}
+      {showEditModal && editingRequest && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <h2 className="font-display text-xl font-bold mb-4">Edit Payment Request</h2>
+            <div className="space-y-4">
+              <textarea placeholder="Deskripsi *" rows={3} value={editData.description} onChange={e => setEditData({...editData, description: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Jumlah (Rp) *" value={editData.amount} onChange={e => { const raw = e.target.value.replace(/\./g, ''); if (/^\d*$/.test(raw)) setEditData({...editData, amount: raw}); }} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Nama Bank" value={editData.bank_name} onChange={e => setEditData({...editData, bank_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Nomor Rekening" value={editData.bank_account_number} onChange={e => setEditData({...editData, bank_account_number: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="text" placeholder="Atas Nama" value={editData.bank_account_name} onChange={e => setEditData({...editData, bank_account_name: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <input type="date" value={editData.request_date} onChange={e => setEditData({...editData, request_date: e.target.value})} className="w-full px-4 py-2 border rounded-lg" />
+              <div>
+                <label className="block text-sm font-medium mb-1">Upload Bukti Baru (opsional)</label>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setEditAttachmentFile(e.target.files?.[0] || null)} className="w-full" />
+                {editingRequest.attachment_url && (
+                  <p className="text-xs text-text-muted mt-1">Bukti saat ini: <a href={editingRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowEditModal(false)} className="px-4 py-2 border rounded-lg">Batal</button>
+              <button onClick={handleEditRequest} disabled={editUploading} className="px-4 py-2 bg-accent text-white rounded-lg">
+                {editUploading ? 'Menyimpan...' : 'Simpan Perubahan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Verifikasi */}
       {showVerifyModal && selectedRequest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-2xl my-8">
@@ -681,22 +725,13 @@ const voucherCode = await generateVoucherNumber(
                   <button type="button" onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg hover:bg-accent/5">+ Baru</button>
                 </div>
               </div>
-              
               <div>
                 <label className="block font-medium">Preview Voucher</label>
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="text" 
-                    value={isGeneratingPreview ? 'Loading...' : voucherPreview} 
-                    readOnly 
-                    className="flex-1 px-4 py-2 border rounded-lg bg-gray-50 font-mono text-sm"
-                  />
+                  <input type="text" value={isGeneratingPreview ? 'Loading...' : voucherPreview} readOnly className="flex-1 px-4 py-2 border rounded-lg bg-gray-50 font-mono text-sm" />
                 </div>
-                <p className="text-xs text-text-muted mt-1">
-                  Voucher akan digenerate otomatis saat verifikasi
-                </p>
+                <p className="text-xs text-text-muted mt-1">Voucher akan digenerate otomatis saat verifikasi</p>
               </div>
-              
               <div>
                 <label className="block font-medium">Akun Debit (Beban/Aset)</label>
                 <select value={verifyData.debitAccountId} onChange={e => setVerifyData({...verifyData, debitAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
@@ -704,7 +739,6 @@ const voucherCode = await generateVoucherNumber(
                   {coaList.filter(c => c.type === 'expense' || c.type === 'asset').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
               </div>
-
               <div>
                 <label className="block font-medium">Akun Kredit (Hutang)</label>
                 <select value={verifyData.creditAccountId} onChange={e => setVerifyData({...verifyData, creditAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
@@ -712,8 +746,6 @@ const voucherCode = await generateVoucherNumber(
                   {coaList.filter(c => c.type === 'liability').map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
               </div>
-
-              {/* 🔥 TAMBAHKAN: AKUN PEMBAYARAN (BANK/KAS) */}
               <div>
                 <label className="block font-medium">Akun Pembayaran (Bank/Kas) *</label>
                 <select value={verifyData.paymentAccountId} onChange={e => setVerifyData({...verifyData, paymentAccountId: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg">
@@ -722,7 +754,6 @@ const voucherCode = await generateVoucherNumber(
                 </select>
                 <p className="text-xs text-text-muted mt-1">Akun ini akan digunakan saat pembayaran nanti (Debit Utang, Kredit Bank/Kas)</p>
               </div>
-
               <div className="grid grid-cols-3 gap-4">
                 <div><label>PPN (Rp)</label><input type="number" value={verifyData.ppn} onChange={e => setVerifyData({...verifyData, ppn: parseInt(e.target.value) || 0, total: selectedRequest.amount + (parseInt(e.target.value) || 0) - verifyData.pph})} className="w-full px-4 py-2 border rounded-lg" /></div>
                 <div><label>PPh 23 (Rp)</label><input type="number" value={verifyData.pph} onChange={e => setVerifyData({...verifyData, pph: parseInt(e.target.value) || 0, total: selectedRequest.amount + verifyData.ppn - (parseInt(e.target.value) || 0)})} className="w-full px-4 py-2 border rounded-lg" /></div>
@@ -753,14 +784,10 @@ const voucherCode = await generateVoucherNumber(
               {selectedRequest.voucher_no && <p><strong>Voucher:</strong> {selectedRequest.voucher_no}</p>}
               {selectedRequest.attachment_url && <p><strong>Bukti:</strong> <a href={selectedRequest.attachment_url} target="_blank" className="text-blue-600">Lihat</a></p>}
             </div>
-            {/* 🔥 DOKUMEN TERKAIT */}
             {selectedRequest && (
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
-                <button
-                  onClick={() => navigate(`/documents?ref=payment_request&id=${selectedRequest.id}`)}
-                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                >
+                <button onClick={() => navigate(`/documents?ref=payment_request&id=${selectedRequest.id}`)} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
                   <FileText className="w-4 h-4" />
                   Lihat dokumen untuk Payment Request ini
                 </button>

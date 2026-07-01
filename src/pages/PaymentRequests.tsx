@@ -256,77 +256,114 @@ export default function PaymentRequests() {
   };
 
   // ============================================================
+  // HANDLE ADD REQUEST (dengan MAX + retry)
+  // ============================================================
   const handleAddRequest = async () => {
-  // Validasi
-  if (!newRequest.description || !newRequest.amount) {
-    alert('Lengkapi deskripsi dan jumlah');
-    return;
-  }
-  if (!attachmentFile) {
-    alert('Upload bukti pendukung (foto/PDF) wajib');
-    return;
-  }
+    // Validasi
+    if (!newRequest.description || !newRequest.amount) {
+      alert('Lengkapi deskripsi dan jumlah');
+      return;
+    }
+    if (!attachmentFile) {
+      alert('Upload bukti pendukung (foto/PDF) wajib');
+      return;
+    }
 
-  setUploading(true);
+    setUploading(true);
 
-  // 1. Upload file
-  const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
-  if (!uploadResult.success) {
-    alert('Gagal upload bukti: ' + uploadResult.error);
-    setUploading(false);
-    return;
-  }
+    // 1. Upload file
+    const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
+    if (!uploadResult.success) {
+      alert('Gagal upload bukti: ' + uploadResult.error);
+      setUploading(false);
+      return;
+    }
 
-  // 2. Generate nomor dari RPC (atomic)
-  const year = new Date().getFullYear();
-  const { data: requestNumber, error: seqError } = await supabase.rpc(
-    'generate_pr_number',
-    { p_company_id: currentCompany!.id, p_year: year }
-  );
+    const year = new Date().getFullYear();
+    const prefix = `PR/${year}/`;
 
-  if (seqError || !requestNumber) {
-    alert('Gagal generate nomor request: ' + seqError?.message);
-    setUploading(false);
-    return;
-  }
+    // Fungsi untuk mendapatkan nomor terakhir
+    const getLastNumber = async () => {
+      const { data } = await supabase
+        .from('payment_requests')
+        .select('request_number')
+        .eq('company_id', currentCompany!.id)
+        .ilike('request_number', `${prefix}%`)
+        .order('request_number', { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) {
+        const parts = data[0].request_number.split('/');
+        return parseInt(parts[parts.length - 1]) || 0;
+      }
+      return 0;
+    };
 
-  // 3. Insert
-  const { data, error } = await supabase
-    .from('payment_requests')
-    .insert([{
-      company_id: currentCompany!.id,
-      request_number: requestNumber,
-      request_date: newRequest.request_date,
-      requester_name: user?.name || user?.email || 'Staff',
-      requester_email: user?.email,
-      description: newRequest.description,
-      amount: parseInt(newRequest.amount) || 0,
-      bank_name: newRequest.bank_name,
-      bank_account_number: newRequest.bank_account_number,
-      bank_account_name: newRequest.bank_account_name,
-      attachment_url: uploadResult.fileUrl,
-      status: 'draft',
-    }])
-    .select();
+    // Fungsi untuk insert dengan retry
+    const insertWithRetry = async (attempt = 0) => {
+      if (attempt > 3) {
+        alert('Gagal setelah 3 kali percobaan. Silakan coba lagi.');
+        setUploading(false);
+        return;
+      }
 
-  if (!error && data) {
-    setRequests([data[0], ...requests]);
-    setShowAddModal(false);
-    // Reset form
-    setNewRequest({
-      description: '',
-      amount: '',
-      request_date: new Date().toISOString().split('T')[0],
-      bank_name: '',
-      bank_account_number: '',
-      bank_account_name: '',
-    });
-    setAttachmentFile(null);
-  } else {
-    alert('Gagal simpan: ' + error?.message);
-  }
-  setUploading(false);
-};
+      // Ambil nomor terbaru
+      const lastNum = await getLastNumber();
+      const nextNum = (lastNum + 1).toString().padStart(4, '0');
+      const requestNumber = `${prefix}${nextNum}`;
+
+      console.log(`🔢 Attempt ${attempt + 1}: Generating ${requestNumber}`);
+
+      const { data, error } = await supabase
+        .from('payment_requests')
+        .insert([{
+          company_id: currentCompany!.id,
+          request_number: requestNumber,
+          request_date: newRequest.request_date,
+          requester_name: user?.name || user?.email || 'Staff',
+          requester_email: user?.email,
+          description: newRequest.description,
+          amount: parseInt(newRequest.amount) || 0,
+          bank_name: newRequest.bank_name,
+          bank_account_number: newRequest.bank_account_number,
+          bank_account_name: newRequest.bank_account_name,
+          attachment_url: uploadResult.fileUrl,
+          status: 'draft',
+        }])
+        .select();
+
+      if (error && error.code === '23505') {
+        console.warn(`⚠️ Duplicate detected for ${requestNumber}, retrying...`);
+        // Tunggu sebentar lalu retry
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return insertWithRetry(attempt + 1);
+      }
+
+      if (error) {
+        alert('Gagal simpan: ' + error.message);
+        setUploading(false);
+        return;
+      }
+
+      if (data) {
+        setRequests([data[0], ...requests]);
+        setShowAddModal(false);
+        setNewRequest({
+          description: '',
+          amount: '',
+          request_date: new Date().toISOString().split('T')[0],
+          bank_name: '',
+          bank_account_number: '',
+          bank_account_name: '',
+        });
+        setAttachmentFile(null);
+        setUploading(false);
+      }
+    };
+
+    // Jalankan insert dengan retry
+    await insertWithRetry();
+  };
+
   // ============================================================
   // EDIT (hanya untuk draft)
   // ============================================================

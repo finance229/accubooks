@@ -540,170 +540,180 @@ export default function Invoices() {
     setShowPaymentModal(true);
   };
 
-  // ============ RECORD PAYMENT (FIX PPh 23) ============
+  // ============ RECORD PAYMENT (FIX PPh 23 - UNIVERSAL) ============
   const handleRecordPayment = async () => {
-  if (!selectedInvoice) return;
-  
-  const amount = parseInt(paymentAmount);
-  if (isNaN(amount) || amount <= 0) {
-    alert('Masukkan jumlah pembayaran yang valid');
-    return;
-  }
-  if (!selectedBankId) {
-    alert('Pilih akun bank/kas');
-    return;
-  }
-  
-  const currentPaid = selectedInvoice.paid_amount || 0;
-  const newPaid = currentPaid + amount;
-  const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
-  
-  const bankAccount = bankAccounts.find(b => b.id === selectedBankId);
-  if (!bankAccount) {
-    alert('Akun bank tidak ditemukan');
-    return;
-  }
-  
-  const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
-  if (!receivableAcc) {
-    alert('Akun piutang tidak ditemukan');
-    return;
-  }
-  
-  // 🔥 ENTRIES JURNAL
-  const entries: any[] = [];
+    if (!selectedInvoice) return;
+    
+    const amount = parseInt(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Masukkan jumlah pembayaran yang valid');
+      return;
+    }
+    if (!selectedBankId) {
+      alert('Pilih akun bank/kas');
+      return;
+    }
+    
+    const currentPaid = selectedInvoice.paid_amount || 0;
+    const newPaid = currentPaid + amount;
+    const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
+    
+    const bankAccount = bankAccounts.find(b => b.id === selectedBankId);
+    if (!bankAccount) {
+      alert('Akun bank tidak ditemukan');
+      return;
+    }
+    
+    const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
+    if (!receivableAcc) {
+      alert('Akun piutang tidak ditemukan');
+      return;
+    }
+    
+    const entries: any[] = [];
 
-  if (includePph) {
-    // 🔥 Ada PPh 23 (potongan 2%)
-    const pphAmount = Math.round(amount * 0.02); 
-    const bankAmount = amount - pphAmount;
+    if (includePph) {
+      // Potongan PPh 23 (2%)
+      const pphAmount = Math.round(amount * 0.02);
+      const bankAmount = amount - pphAmount;
 
-    // Cari akun PPh 23 Dibayar Dimuka berdasarkan nama (lebih fleksibel)
-    const { data: pphPrepaidAccounts } = await supabase
-      .from('coa')
-      .select('id, code, name')
-      .eq('company_id', currentCompany!.id)
-      .eq('is_active', true)
-      .or('name.ilike.%PPh 23 Dibayar Dimuka%,name.ilike.%Pajak Penghasilan 23 Dibayar%')
-      .limit(1);
-
-    let pphPrepaidAcc = null;
-    if (pphPrepaidAccounts && pphPrepaidAccounts.length > 0) {
-      pphPrepaidAcc = pphPrepaidAccounts[0];
-    } else {
-      // Fallback: cari akun dengan kode 1232 (jika ada)
-      const { data: fallbackAccounts } = await supabase
+      // 🔥 Cari akun PPh 23 Dibayar Dimuka (prioritas tipe asset / tax)
+      const { data: pphAccounts } = await supabase
         .from('coa')
-        .select('id, code, name')
+        .select('id, code, name, type')
         .eq('company_id', currentCompany!.id)
         .eq('is_active', true)
-        .eq('code', '1232')
+        .or('name.ilike.%PPh 23 Dibayar Dimuka%,name.ilike.%PPh 23%,name.ilike.%Pajak Penghasilan 23%')
+        .in('type', ['asset', 'tax'])
         .limit(1);
-      if (fallbackAccounts && fallbackAccounts.length > 0) {
-        pphPrepaidAcc = fallbackAccounts[0];
+
+      let pphPrepaidAcc = pphAccounts && pphAccounts.length > 0 ? pphAccounts[0] : null;
+
+      // Jika tidak ditemukan, coba tanpa filter type
+      if (!pphPrepaidAcc) {
+        const { data: fallbackAccounts } = await supabase
+          .from('coa')
+          .select('id, code, name')
+          .eq('company_id', currentCompany!.id)
+          .eq('is_active', true)
+          .or('name.ilike.%PPh 23 Dibayar Dimuka%,name.ilike.%PPh 23%,name.ilike.%Pajak Penghasilan 23%')
+          .limit(1);
+        pphPrepaidAcc = fallbackAccounts && fallbackAccounts.length > 0 ? fallbackAccounts[0] : null;
       }
+
+      // Jika masih tidak ditemukan, coba cari dengan kode yang umum (1232, 1213, dll)
+      if (!pphPrepaidAcc) {
+        const { data: codeAccounts } = await supabase
+          .from('coa')
+          .select('id, code, name')
+          .eq('company_id', currentCompany!.id)
+          .eq('is_active', true)
+          .in('code', ['1232', '1232-01', '1213', '1132'])
+          .limit(1);
+        pphPrepaidAcc = codeAccounts && codeAccounts.length > 0 ? codeAccounts[0] : null;
+      }
+
+      // Jika tetap tidak ditemukan, beri error
+      if (!pphPrepaidAcc) {
+        alert('Akun PPh 23 (PPh 23 Dibayar Dimuka) tidak ditemukan di COA. Pastikan ada akun dengan nama "PPh 23 Dibayar Dimuka" atau "PPh 23" dengan tipe aset/tax.');
+        return;
+      }
+
+      // Debit Bank (jumlah yang diterima setelah potongan)
+      entries.push({
+        account_id: bankAccount.id,
+        account_code: bankAccount.code,
+        account_name: bankAccount.name,
+        debit: bankAmount,
+        credit: 0,
+      });
+
+      // Debit PPh 23 Dibayar Dimuka (aset)
+      entries.push({
+        account_id: pphPrepaidAcc.id,
+        account_code: pphPrepaidAcc.code,
+        account_name: pphPrepaidAcc.name,
+        debit: pphAmount,
+        credit: 0,
+      });
+
+      // Kredit Piutang (full amount)
+      entries.push({
+        account_id: receivableAcc.id,
+        account_code: receivableAcc.code,
+        account_name: receivableAcc.name,
+        debit: 0,
+        credit: amount,
+      });
+
+    } else {
+      // Tanpa PPh 23
+      entries.push({
+        account_id: bankAccount.id,
+        account_code: bankAccount.code,
+        account_name: bankAccount.name,
+        debit: amount,
+        credit: 0,
+      });
+      entries.push({
+        account_id: receivableAcc.id,
+        account_code: receivableAcc.code,
+        account_name: receivableAcc.name,
+        debit: 0,
+        credit: amount,
+      });
     }
 
-    if (!pphPrepaidAcc) {
-      alert('Akun PPh 23 Dibayar Dimuka tidak ditemukan di COA. Pastikan ada akun dengan nama "PPh 23 Dibayar Dimuka" atau kode 1232.');
+    // Buat jurnal
+    const journalId = await createGeneralJournal(
+      currentCompany!.id,
+      paymentDate,
+      `Penerimaan pembayaran dari ${selectedInvoice.customer_name} untuk invoice ${selectedInvoice.invoice_number}`,
+      selectedInvoice.invoice_number,
+      'INVOICE_PAYMENT',
+      selectedInvoice.id,
+      entries,
+      selectedInvoice.project_id || undefined
+    );
+
+    if (!journalId) {
+      alert('Gagal membuat jurnal pembayaran');
       return;
     }
 
-    // Debit Bank (jumlah yang diterima)
-    entries.push({
-      account_id: bankAccount.id,
-      account_code: bankAccount.code,
-      account_name: bankAccount.name,
-      debit: bankAmount,
-      credit: 0,
-    });
+    // Update invoice
+    const { error } = await supabase
+      .from('invoices')
+      .update({ 
+        paid_amount: newPaid,
+        status: newStatus,
+        last_payment_date: paymentDate
+      })
+      .eq('id', selectedInvoice.id);
 
-    // Debit PPh 23 Dibayar Dimuka (aset)
-    entries.push({
-      account_id: pphPrepaidAcc.id,
-      account_code: pphPrepaidAcc.code,
-      account_name: pphPrepaidAcc.name,
-      debit: pphAmount,
-      credit: 0,
-    });
+    if (error) {
+      alert('Gagal mencatat pembayaran');
+      return;
+    }
 
-    // Kredit Piutang (full amount)
-    entries.push({
-      account_id: receivableAcc.id,
-      account_code: receivableAcc.code,
-      account_name: receivableAcc.name,
-      debit: 0,
-      credit: amount,
-    });
+    // Simpan ke invoice_payments
+    const pphAmount = includePph ? Math.round(amount * 0.02) : 0;
+    await supabase.from('invoice_payments').insert([{
+      invoice_id: selectedInvoice.id,
+      payment_date: paymentDate,
+      amount: amount - pphAmount,
+      pph_amount: pphAmount,
+      payment_method: paymentMethod,
+      bank_account_id: selectedBankId,
+      created_by: user?.email,
+    }]);
 
-  } else {
-    // Tanpa PPh 23
-    entries.push({
-      account_id: bankAccount.id,
-      account_code: bankAccount.code,
-      account_name: bankAccount.name,
-      debit: amount,
-      credit: 0,
-    });
-    entries.push({
-      account_id: receivableAcc.id,
-      account_code: receivableAcc.code,
-      account_name: receivableAcc.name,
-      debit: 0,
-      credit: amount,
-    });
-  }
-
-  // Buat jurnal
-  const journalId = await createGeneralJournal(
-    currentCompany!.id,
-    paymentDate,
-    `Penerimaan pembayaran dari ${selectedInvoice.customer_name} untuk invoice ${selectedInvoice.invoice_number}`,
-    selectedInvoice.invoice_number,
-    'INVOICE_PAYMENT',
-    selectedInvoice.id,
-    entries,
-    selectedInvoice.project_id || undefined
-  );
-
-  if (!journalId) {
-    alert('Gagal membuat jurnal pembayaran');
-    return;
-  }
-
-  // Update invoice
-  const { error } = await supabase
-    .from('invoices')
-    .update({ 
-      paid_amount: newPaid,
-      status: newStatus,
-      last_payment_date: paymentDate
-    })
-    .eq('id', selectedInvoice.id);
-
-  if (error) {
-    alert('Gagal mencatat pembayaran');
-    return;
-  }
-
-  // Simpan ke invoice_payments
-  const pphAmount = includePph ? Math.round(amount * 0.02) : 0;
-  await supabase.from('invoice_payments').insert([{
-    invoice_id: selectedInvoice.id,
-    payment_date: paymentDate,
-    amount: amount - pphAmount,
-    pph_amount: pphAmount,
-    payment_method: paymentMethod,
-    bank_account_id: selectedBankId,
-    created_by: user?.email,
-  }]);
-
-  alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat${includePph ? ` (PPh 23: ${formatCurrency(pphAmount)})` : ''}`);
-  setShowPaymentModal(false);
-  setPaymentAmount('');
-  setIncludePph(false);
-  fetchInvoices();
-};
+    alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat${includePph ? ` (PPh 23: ${formatCurrency(pphAmount)})` : ''}`);
+    setShowPaymentModal(false);
+    setPaymentAmount('');
+    setIncludePph(false);
+    fetchInvoices();
+  };
 
   const handleDownloadPDF = async (invoice: Invoice) => {
     try {

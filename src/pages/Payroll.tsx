@@ -12,7 +12,6 @@ import {
   formatCurrency, 
   createGeneralJournal, 
   getDefaultAccount,
-  getNextJournalNumber
 } from '../lib/accountingHelpers';
 
 type PayrollRow = {
@@ -589,43 +588,23 @@ export default function Payroll() {
         }
       }
 
-      // Buat master journal
-      if (masterEntries.length > 0) {
-        const year = new Date().getFullYear();
-        const seq = await getNextJournalNumber(currentCompany.id, year);
-        const journalNumber = `JU-${year}-${String(seq).padStart(4, '0')}`;
+      // Buat master journal pake createGeneralJournal
+if (masterEntries.length > 0) {
+  const masterJournalIdResult = await createGeneralJournal(
+    currentCompany.id,
+    new Date().toISOString().split('T')[0],
+    masterDescription,
+    `PAY-MASTER-${Date.now()}`,
+    'PAYROLL_MASTER',
+    0,
+    masterEntries
+  );
 
-        const { data: masterJournal, error: mjError } = await supabase
-          .from('journals')
-          .insert({
-            company_id: currentCompany.id,
-            journal_number: journalNumber,
-            journal_date: new Date().toISOString().split('T')[0],
-            description: masterDescription,
-            status: 'posted',
-            posted_by: user?.email || 'system',
-            posted_at: new Date().toISOString(),
-          })
-          .select()
-          .single();
-
-        if (mjError || !masterJournal) {
-          throw new Error('Gagal membuat master journal: ' + mjError?.message);
-        }
-
-        masterJournalId = masterJournal.id;
-
-        // Insert lines master
-        const masterLines = masterEntries.map(e => ({
-          journal_id: masterJournal.id,
-          coa_id: e.account_id,
-          account_code: e.account_code,
-          account_name: e.account_name,
-          debit: e.debit,
-          credit: e.credit,
-        }));
-        await supabase.from('journal_lines').insert(masterLines);
-      }
+  if (!masterJournalIdResult) {
+    throw new Error('Gagal membuat master journal');
+  }
+  masterJournalId = masterJournalIdResult;
+}
 
       // === 2. Buat Jurnal Per Karyawan ===
       for (const row of draftRows) {

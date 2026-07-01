@@ -65,7 +65,6 @@ export const checkProjectBudget = async (projectId: number, amount: number) => {
   
   if (error || !project) return { sufficient: false, message: 'Proyek tidak ditemukan', remaining: 0 };
   
-  // 🔥 JIKA BUDGET = 0, ANGGAP TIDAK TERBATAS (UNLIMITED)
   if (project.budget === 0) {
     return {
       sufficient: true,
@@ -106,11 +105,12 @@ export const updateProjectSpent = async (projectId: number, amount: number) => {
 };
 
 // ============================================
-// GET DEFAULT ACCOUNT
+// GET DEFAULT ACCOUNT (FIXED)
 // ============================================
-export const getDefaultAccount = async (_companyId: number, type: string) => {
-  const suffix = getCompanySuffix(_companyId);
+export const getDefaultAccount = async (companyId: number, type: string) => {
+  const suffix = getCompanySuffix(companyId);
   
+  // Mapping khusus (tetap dipertahankan)
   const mapping: Record<string, string> = {
     receivable: '1111',
     ppn_in: '1131',
@@ -134,26 +134,55 @@ export const getDefaultAccount = async (_companyId: number, type: string) => {
     expense_electricity: '5112',
     expense_depreciation: '5152',
   };
-  
-  const baseCode = mapping[type];
-  if (!baseCode) {
-    console.error(`Mapping untuk tipe "${type}" tidak ditemukan`);
-    return null;
+
+  // 1. Coba cari berdasarkan kode spesifik (jika type ada di mapping)
+  if (mapping[type]) {
+    const baseCode = mapping[type];
+    const { data, error } = await supabase
+      .from('coa')
+      .select('id, code, name, type')
+      .eq('company_id', companyId)
+      .eq('code', baseCode)
+      .eq('suffix', suffix)
+      .maybeSingle();
+
+    if (!error && data) {
+      return data;
+    }
   }
-  
+
+  // 2. Fallback: cari berdasarkan tipe umum (expense, liability, asset)
   const { data, error } = await supabase
     .from('coa')
     .select('id, code, name, type')
-    .eq('company_id', _companyId)
-    .eq('code', baseCode)
+    .eq('company_id', companyId)
+    .eq('type', type)
     .eq('suffix', suffix)
-    .single();
-  
-  if (error) {
-    console.error(`Akun ${type} (${baseCode}-${suffix}) tidak ditemukan untuk company ${_companyId}`);
-    return null;
+    .eq('is_active', true)
+    .order('code')
+    .limit(1);
+
+  if (!error && data && data.length > 0) {
+    return data[0];
   }
-  return data;
+
+  // 3. Terakhir: ambil akun pertama dengan tipe tersebut (tanpa suffix)
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from('coa')
+    .select('id, code, name, type')
+    .eq('company_id', companyId)
+    .eq('type', type)
+    .eq('is_active', true)
+    .order('code')
+    .limit(1);
+
+  if (!fallbackError && fallbackData && fallbackData.length > 0) {
+    console.warn(`⚠️ Akun ${type} tanpa suffix ditemukan, menggunakan ${fallbackData[0].code} - ${fallbackData[0].name}`);
+    return fallbackData[0];
+  }
+
+  console.error(`❌ Akun dengan tipe "${type}" tidak ditemukan untuk company ${companyId}`);
+  return null;
 };
 
 // ============================================
@@ -525,14 +554,13 @@ export const createVendorIfNotExist = async (
 };
 
 // ============================================
-// 🔥🔥🔥 GENERATE INVOICE NO (NEW FORMAT) 🔥🔥🔥
+// GENERATE INVOICE NO
 // ============================================
 export const generateInvoiceNo = async (
   companyId: number,
   date: Date,
   projectCode: string | null = null
 ): Promise<string> => {
-  // Ambil kode perusahaan (ARKO, MMC, USA)
   const { data: company } = await supabase
     .from('companies')
     .select('code')
@@ -541,14 +569,11 @@ export const generateInvoiceNo = async (
   
   const companyCode = company?.code || 'INV';
 
-  // Format tahun dan bulan (terpisah)
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
 
-  // Project code (default GENERAL)
   const projectPart = projectCode || 'GENERAL';
 
-  // Cari nomor urut terakhir
   const pattern = `${companyCode}/INV/${year}/${month}/${projectPart}/%`;
   const { data: lastInvoice } = await supabase
     .from('invoices')
@@ -567,18 +592,16 @@ export const generateInvoiceNo = async (
 
   const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
 
-  // 🔥 FORMAT: ARKO/INV/2026/06/PRJ001/001
   return `${companyCode}/INV/${year}/${month}/${projectPart}/${nextNumber}`;
 };
 
 // ============================================
-// GENERATE VOUCHER NO (RPC - bisa dihapus jika tidak dipakai)
+// GENERATE VOUCHER NO (SEQUENCE)
 // ============================================
 export const generateVoucherNumber = async (
   companyId: number,
-  prefix: string // contoh: 'PT A/2026/06/BNPB'
+  prefix: string
 ): Promise<string> => {
-  // Cari atau buat sequence
   let { data: seq } = await supabase
     .from('voucher_sequences')
     .select('last_number')
@@ -587,7 +610,6 @@ export const generateVoucherNumber = async (
     .single();
 
   if (!seq) {
-    // Buat baru
     const { data: newSeq } = await supabase
       .from('voucher_sequences')
       .insert({ company_id: companyId, prefix, last_number: 0 })
@@ -596,17 +618,14 @@ export const generateVoucherNumber = async (
     seq = newSeq;
   }
 
-  // Increment
   const nextNumber = (seq.last_number || 0) + 1;
 
-  // Update
   await supabase
     .from('voucher_sequences')
     .update({ last_number: nextNumber, updated_at: new Date().toISOString() })
     .eq('company_id', companyId)
     .eq('prefix', prefix);
 
-  // Format 3 digit
   const formatted = String(nextNumber).padStart(3, '0');
   return `${prefix}/${formatted}`;
 };
@@ -658,7 +677,6 @@ export const createProjectIfNotExist = async (
 };
 
 // ============================================
-// ============================================
 // CREATE PAYROLL JOURNAL (UPDATED)
 // ============================================
 export const createPayrollJournal = async (
@@ -667,13 +685,12 @@ export const createPayrollJournal = async (
   createdBy: string = 'system'
 ): Promise<number | null> => {
   try {
-    // Mapping COA (pastikan semua ada)
     const coaMap: Record<string, string> = {
       beban_gaji_pokok: '5101',
       beban_tunjangan: '5102',
       beban_bpjs_kes: '5103',
       beban_bpjs_tk: '5104',
-      beban_tunjangan_pph21: '5106',   // 🔥 AKUN BARU
+      beban_tunjangan_pph21: '5106',
       utang_bpjs_kes: '2102',
       utang_bpjs_tk: '2103',
       utang_pph21: '2103-01',
@@ -700,7 +717,6 @@ export const createPayrollJournal = async (
       return data || { code: '', name: '' };
     };
 
-    // Ambil semua ID akun
     const bebanGajiPokokId = await getAccountId(coaMap.beban_gaji_pokok);
     const bebanTunjanganId = await getAccountId(coaMap.beban_tunjangan);
     const bebanBpjsKesId = await getAccountId(coaMap.beban_bpjs_kes);
@@ -717,7 +733,6 @@ export const createPayrollJournal = async (
       return null;
     }
 
-    // Ambil nama akun
     const debitAcc = await getAccountDetails(bebanGajiPokokId);
     const tunjanganAcc = await getAccountDetails(bebanTunjanganId);
     const bpjsKesAcc = await getAccountDetails(bebanBpjsKesId);
@@ -728,10 +743,8 @@ export const createPayrollJournal = async (
     const utangPph21Acc = await getAccountDetails(utangPph21Id);
     const kasAcc = await getAccountDetails(kasId);
 
-    // ========== BUAT ENTRIES JURNAL ==========
     const entries: any[] = [];
 
-    // 1. Debit Beban Gaji Pokok
     entries.push({
       account_id: bebanGajiPokokId,
       account_code: debitAcc.code,
@@ -740,7 +753,6 @@ export const createPayrollJournal = async (
       credit: 0,
     });
 
-    // 2. Debit Beban Tunjangan Lainnya
     if (payroll.tunjangan_lainnya > 0) {
       entries.push({
         account_id: bebanTunjanganId,
@@ -751,7 +763,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 3. Debit Beban BPJS Kesehatan
     if (payroll.bpjs_kesehatan > 0) {
       entries.push({
         account_id: bebanBpjsKesId,
@@ -762,7 +773,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 4. Debit Beban BPJS TK
     if (payroll.bpjs_tk > 0) {
       entries.push({
         account_id: bebanBpjsTkId,
@@ -773,7 +783,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 5. 🔥 Debit Beban Tunjangan PPh 21 (Deductible)
     if (payroll.tunjangan_pph21 > 0) {
       entries.push({
         account_id: bebanTunjanganPph21Id,
@@ -784,7 +793,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 6. Kredit Kas/Bank (Gaji Bersih)
     entries.push({
       account_id: kasId,
       account_code: kasAcc.code,
@@ -793,7 +801,6 @@ export const createPayrollJournal = async (
       credit: payroll.gaji_bersih,
     });
 
-    // 7. Kredit Utang BPJS Kesehatan
     if (payroll.bpjs_kesehatan > 0) {
       entries.push({
         account_id: utangBpjsKesId,
@@ -804,7 +811,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 8. Kredit Utang BPJS TK
     if (payroll.bpjs_tk > 0) {
       entries.push({
         account_id: utangBpjsTkId,
@@ -815,7 +821,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 9. 🔥 Kredit Utang PPh 21 (Potongan PPh 21)
     if (payroll.potongan_pph21 > 0) {
       entries.push({
         account_id: utangPph21Id,
@@ -826,7 +831,6 @@ export const createPayrollJournal = async (
       });
     }
 
-    // 🔥 BUAT JURNAL
     const description = `Payroll ${payroll.employee_name || 'Karyawan'} - ${payroll.period.slice(0, 7)}`;
     const reference = `PAY-${payroll.id}-${Date.now()}`;
 

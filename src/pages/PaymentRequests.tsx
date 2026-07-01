@@ -121,6 +121,9 @@ export default function PaymentRequests() {
     }
   }, [currentCompany]);
 
+  // ============================================
+  // FETCH COMPANY CODE - menghasilkan A, B, C
+  // ============================================
   const fetchCompanyCode = async () => {
     if (!currentCompany?.id) return;
     try {
@@ -133,13 +136,21 @@ export default function PaymentRequests() {
         console.error('Error fetching company:', error);
         return;
       }
-      const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
+      let rawCode = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
+      // Ubah "PT A" -> "A", "PT M" -> "M", "PT U" -> "U"
+      if (rawCode.startsWith('PT ')) {
+        rawCode = rawCode.replace('PT ', '').trim();
+      }
+      const code = rawCode.charAt(0).toUpperCase();
       setCompanyCode(code);
     } catch (err) {
       console.error('Fetch error:', err);
     }
   };
 
+  // ============================================
+  // GENERATE PREVIEW VOUCHER
+  // ============================================
   const generateVoucherPreview = async () => {
     if (!currentCompany?.id || !companyCode) {
       setVoucherPreview('');
@@ -188,6 +199,9 @@ export default function PaymentRequests() {
     }
   }, [companyCode, verifyData.projectId, projects]);
 
+  // ============================================
+  // DATA FETCHING
+  // ============================================
   const fetchRequests = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
@@ -233,6 +247,9 @@ export default function PaymentRequests() {
     setBankAccounts(data || []);
   };
 
+  // ============================================
+  // CREATE PROJECT
+  // ============================================
   const handleCreateProject = async () => {
     if (!newProject.code || !newProject.name) {
       alert('Kode dan nama proyek wajib diisi');
@@ -280,7 +297,8 @@ export default function PaymentRequests() {
     }
 
     const year = new Date().getFullYear();
-    const prefix = `PR/${year}/`;
+    // Prefix: A/PR/2026/  (companyCode sudah huruf tunggal)
+    const prefix = `${companyCode}/PR/${year}/`;
 
     // Fungsi untuk mendapatkan nomor terakhir
     const getLastNumber = async () => {
@@ -306,7 +324,6 @@ export default function PaymentRequests() {
         return;
       }
 
-      // Ambil nomor terbaru
       const lastNum = await getLastNumber();
       const nextNum = (lastNum + 1).toString().padStart(4, '0');
       const requestNumber = `${prefix}${nextNum}`;
@@ -333,7 +350,6 @@ export default function PaymentRequests() {
 
       if (error && error.code === '23505') {
         console.warn(`⚠️ Duplicate detected for ${requestNumber}, retrying...`);
-        // Tunggu sebentar lalu retry
         await new Promise(resolve => setTimeout(resolve, 100));
         return insertWithRetry(attempt + 1);
       }
@@ -360,7 +376,6 @@ export default function PaymentRequests() {
       }
     };
 
-    // Jalankan insert dengan retry
     await insertWithRetry();
   };
 
@@ -430,6 +445,9 @@ export default function PaymentRequests() {
     setEditUploading(false);
   };
 
+  // ============================================
+  // SUBMIT, VERIFY, APPROVE
+  // ============================================
   const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('payment_requests')
@@ -582,6 +600,9 @@ export default function PaymentRequests() {
     } else alert('Gagal approve');
   };
 
+  // ============================================
+  // FILTER & RENDER
+  // ============================================
   const filteredRequests = requests.filter(req => {
     const matchesSearch = req.request_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          req.description?.toLowerCase().includes(searchTerm.toLowerCase());

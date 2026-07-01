@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { 
-  Plus, Search, Eye, Edit2, Trash2, Send, Loader2, 
+import {
+  Plus, Search, Eye, Edit2, Trash2, Send, Loader2,
   Clock, Copy, Save, CheckSquare, X
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -8,26 +8,23 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useCompany } from '../contexts/CompanyContext';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  formatCurrency, 
-  createGeneralJournal, 
+import {
+  formatCurrency,
+  createGeneralJournal,
   getDefaultAccount,
 } from '../lib/accountingHelpers';
 
-// ============================================================
-// TYPES
-// ============================================================
 type PayrollRow = {
   id?: number;
   employee_name: string;
   period: string;
   gaji_pokok: number;
-  bpjs_kesehatan: number;
-  bpjs_tk: number;
+  bpjs_kesehatan: number;   // manual input
+  bpjs_tk: number;          // manual input
   tunjangan_lainnya: number;
-  tunjangan_pph21: number;    // 🔥 BARU
-  potongan_pph21: number;     // 🔥 BARU
-  pph21: number;              // 🔥 TETAP ADA SEBAGAI INFO
+  tunjangan_pph21: number;
+  potongan_pph21: number;
+  pph21: number;
   gaji_bersih: number;
   bank_account_id: number;
   status: 'draft' | 'posted';
@@ -53,15 +50,11 @@ type Coa = {
   type: string;
 };
 
-// ============================================================
-// MAIN COMPONENT
-// ============================================================
 export default function Payroll() {
   const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const { user } = useAuth();
-  
-  // ============ STATE ============
+
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [overtimes, setOvertimes] = useState<Overtime[]>([]);
   const [bankAccounts, setBankAccounts] = useState<Coa[]>([]);
@@ -77,10 +70,10 @@ export default function Payroll() {
   const [overtimeForm, setOvertimeForm] = useState({ amount: 0, description: '', bank_account_id: 0 });
   const [editingOvertimeId, setEditingOvertimeId] = useState<number | null>(null);
   const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
-  
+
   const autoSaveTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // ============ FETCH DATA ============
+  // ===================== FETCH DATA =====================
   useEffect(() => {
     if (currentCompany?.id) {
       fetchBankAccounts();
@@ -94,6 +87,7 @@ export default function Payroll() {
     }
   }, [period]);
 
+  // 🔥 QUERY BANK YANG PASTI MUNCUL
   const fetchBankAccounts = async () => {
     if (!currentCompany?.id) return;
     const { data } = await supabase
@@ -102,8 +96,8 @@ export default function Payroll() {
       .eq('company_id', currentCompany.id)
       .eq('is_active', true)
       .eq('type', 'asset')
-      .ilike('name', '%bank%')
-      .or('name.ilike.%kas%');
+      .or('name.ilike.%bank%, name.ilike.%kas%, code.ilike.1102%')
+      .order('code');
     setBankAccounts(data || []);
   };
 
@@ -116,13 +110,11 @@ export default function Payroll() {
       .eq('company_id', currentCompany.id)
       .eq('period', `${period}-01`)
       .order('employee_name');
-    
     if (error) {
       console.error('Error fetching payroll:', error);
       setLoading(false);
       return;
     }
-    
     if (data && data.length > 0) {
       setRows(data);
       const ids = data.map(r => r.id);
@@ -138,36 +130,32 @@ export default function Payroll() {
     setLoading(false);
   };
 
-  // ============ COPY FROM PREVIOUS MONTH ============
+  // ===================== COPY PREVIOUS MONTH =====================
   const copyFromPreviousMonth = async () => {
     if (!currentCompany?.id) return;
     if (!confirm(`Copy data payroll dari bulan sebelumnya ke ${period}?`)) return;
-    
     setIsLoadingPrevious(true);
     const prevDate = new Date(period);
     prevDate.setMonth(prevDate.getMonth() - 1);
     const prevPeriod = prevDate.toISOString().slice(0, 7);
-    
     const { data, error } = await supabase
       .from('payroll')
       .select('*')
       .eq('company_id', currentCompany.id)
       .eq('period', `${prevPeriod}-01`)
       .eq('status', 'posted');
-    
     if (error) {
       alert('Gagal mengambil data bulan sebelumnya');
       setIsLoadingPrevious(false);
       return;
     }
-    
     if (data && data.length > 0) {
       const newRows = data.map(r => ({
         employee_name: r.employee_name,
         period: `${period}-01`,
         gaji_pokok: r.gaji_pokok,
-        bpjs_kesehatan: r.bpjs_kesehatan,
-        bpjs_tk: r.bpjs_tk,
+        bpjs_kesehatan: r.bpjs_kesehatan || 0,
+        bpjs_tk: r.bpjs_tk || 0,
         tunjangan_lainnya: r.tunjangan_lainnya,
         tunjangan_pph21: r.tunjangan_pph21 || 0,
         potongan_pph21: r.potongan_pph21 || 0,
@@ -187,38 +175,31 @@ export default function Payroll() {
     setIsLoadingPrevious(false);
   };
 
-  // ============ AUTO CALCULATE ============
+  // ===================== CALCULATE & UPDATE =====================
+  // 🔥 BPJS TIDAK DI-CALCULATE OTOMATIS (MANUAL)
   const calculateRow = (row: PayrollRow): PayrollRow => {
     const gajiPokok = Number(row.gaji_pokok) || 0;
-    const bpjsKes = Math.round(gajiPokok * 0.05);
-    const bpjsTk = Math.round(gajiPokok * 0.0924);
     const tunjangan = Number(row.tunjangan_lainnya) || 0;
     const tunjanganPph21 = Number(row.tunjangan_pph21) || 0;
     const potonganPph21 = Number(row.potongan_pph21) || 0;
-    
-    // 🔥 FORMULA BARU
     const gajiBersih = gajiPokok + tunjangan + tunjanganPph21 - potonganPph21;
-    
     return {
       ...row,
-      bpjs_kesehatan: bpjsKes,
-      bpjs_tk: bpjsTk,
       gaji_bersih: gajiBersih,
+      // bpjs_kesehatan dan bpjs_tk dibiarkan sesuai input user
     };
   };
 
-  // ============ UPDATE ROW & AUTO-SYNC ============
   const updateRow = (index: number, field: keyof PayrollRow, value: any) => {
     const newRows = [...rows];
     let updated = { ...newRows[index], [field]: value };
-    
-    // 🔥 Jika user mengubah PPh 21, otomatis isi tunjangan_pph21 & potongan_pph21
+
+    // Auto-sync PPh 21 ↔ Tunj. PPh 21 ↔ Pot. PPh 21
     if (field === 'pph21') {
       const pph = Number(value) || 0;
       updated.tunjangan_pph21 = pph;
       updated.potongan_pph21 = pph;
     }
-    // Jika user mengubah tunjangan_pph21, sinkronkan ke potongan_pph21 dan pph21
     if (field === 'tunjangan_pph21') {
       const val = Number(value) || 0;
       updated.potongan_pph21 = val;
@@ -229,8 +210,7 @@ export default function Payroll() {
       updated.tunjangan_pph21 = val;
       updated.pph21 = val;
     }
-    
-    // Re-calculate semua komponen
+
     updated = calculateRow(updated);
     newRows[index] = updated;
     setRows(newRows);
@@ -265,12 +245,7 @@ export default function Payroll() {
       return;
     }
     if (!confirm(`Hapus payroll untuk ${row.employee_name}?`)) return;
-    
-    const { error } = await supabase
-      .from('payroll')
-      .delete()
-      .eq('id', row.id);
-    
+    const { error } = await supabase.from('payroll').delete().eq('id', row.id);
     if (!error) {
       setRows(rows.filter((_, i) => i !== index));
       setOvertimes(overtimes.filter(ot => ot.payroll_id !== row.id));
@@ -279,7 +254,7 @@ export default function Payroll() {
     }
   };
 
-  // ============ AUTO SAVE ============
+  // ===================== AUTO SAVE =====================
   const autoSave = () => {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(saveAllRows, 1500);
@@ -321,7 +296,7 @@ export default function Payroll() {
     }
   };
 
-  // ============ OVERTIME ============
+  // ===================== OVERTIME =====================
   const openOvertimeModal = (payrollId: number, employeeName: string) => {
     setSelectedPayrollId(payrollId);
     setSelectedPayrollName(employeeName);
@@ -349,7 +324,6 @@ export default function Payroll() {
       alert('Lengkapi semua field lemburan');
       return;
     }
-
     const dataToSave = {
       payroll_id: selectedPayrollId,
       company_id: currentCompany.id,
@@ -359,24 +333,15 @@ export default function Payroll() {
       status: 'draft' as const,
       created_by: user?.email,
     };
-
     if (editingOvertimeId) {
-      const { error } = await supabase
-        .from('payroll_overtime')
-        .update(dataToSave)
-        .eq('id', editingOvertimeId);
+      const { error } = await supabase.from('payroll_overtime').update(dataToSave).eq('id', editingOvertimeId);
       if (!error) {
-        setOvertimes(overtimes.map(ot => 
-          ot.id === editingOvertimeId ? { ...ot, ...dataToSave } : ot
-        ));
+        setOvertimes(overtimes.map(ot => ot.id === editingOvertimeId ? { ...ot, ...dataToSave } : ot));
       } else {
         alert('Gagal update: ' + error.message);
       }
     } else {
-      const { data, error } = await supabase
-        .from('payroll_overtime')
-        .insert([dataToSave])
-        .select();
+      const { data, error } = await supabase.from('payroll_overtime').insert([dataToSave]).select();
       if (!error && data) {
         setOvertimes([...overtimes, data[0]]);
       } else {
@@ -388,31 +353,22 @@ export default function Payroll() {
 
   const deleteOvertime = async (id: number) => {
     if (!confirm('Hapus lemburan ini?')) return;
-    const { error } = await supabase
-      .from('payroll_overtime')
-      .delete()
-      .eq('id', id);
-    if (!error) {
-      setOvertimes(overtimes.filter(ot => ot.id !== id));
-    }
+    const { error } = await supabase.from('payroll_overtime').delete().eq('id', id);
+    if (!error) setOvertimes(overtimes.filter(ot => ot.id !== id));
   };
 
   const postOvertime = async (id: number) => {
     if (!confirm('Posting lemburan ini?')) return;
     if (!currentCompany?.id) return;
-
     try {
       const ot = overtimes.find(o => o.id === id);
       if (!ot) return;
-
       const expenseAcc = await getDefaultAccount(currentCompany.id, 'expense');
       const bankAcc = bankAccounts.find(b => b.id === ot.bank_account_id);
-
       if (!expenseAcc || !bankAcc) {
         alert('Akun tidak ditemukan');
         return;
       }
-
       const entries = [
         {
           account_id: expenseAcc.id,
@@ -429,7 +385,6 @@ export default function Payroll() {
           credit: ot.amount,
         },
       ];
-
       const journalId = await createGeneralJournal(
         currentCompany.id,
         new Date().toISOString().split('T')[0],
@@ -439,12 +394,10 @@ export default function Payroll() {
         ot.id,
         entries
       );
-
       if (!journalId) {
         alert('Gagal membuat jurnal');
         return;
       }
-
       await supabase
         .from('payroll_overtime')
         .update({
@@ -454,46 +407,33 @@ export default function Payroll() {
           posted_at: new Date().toISOString(),
         })
         .eq('id', id);
-
-      setOvertimes(overtimes.map(o => 
-        o.id === id ? { ...o, status: 'posted', journal_id: journalId } : o
-      ));
+      setOvertimes(overtimes.map(o => o.id === id ? { ...o, status: 'posted', journal_id: journalId } : o));
       alert('Lemburan berhasil diposting!');
     } catch (err: any) {
       alert('Gagal posting: ' + err.message);
     }
   };
 
-  // ============ POST ALL PAYROLL (2 JURNAL) ============
+  // ===================== POST ALL (2 JURNAL) =====================
   const postAll = async () => {
     const draftRows = rows.filter(r => r.status === 'draft' && r.employee_name.trim());
     if (draftRows.length === 0) {
       alert('Tidak ada payroll draft untuk diposting');
       return;
     }
-
     if (!confirm(`Posting ${draftRows.length} payroll?`)) return;
     if (!currentCompany?.id) return;
-
     setPostingAll(true);
-    let successCount = 0;
-    let failCount = 0;
+    let successCount = 0, failCount = 0;
     let masterJournalId: number | null = null;
 
     try {
-      // ==========================================================
-      // 1. BUAT JURNAL GABUNGAN (MASTER)
-      // ==========================================================
+      // ========== 1. JURNAL GABUNGAN (MASTER) ==========
       const masterEntries: any[] = [];
-      
       for (const row of draftRows) {
         const bank = bankAccounts.find(b => b.id === row.bank_account_id);
-        if (!bank) {
-          failCount++;
-          continue;
-        }
+        if (!bank) { failCount++; continue; }
 
-        // Ambil akun (pakai getDefaultAccount)
         const bebanGajiPokok = await getDefaultAccount(currentCompany.id, 'expense');
         const bebanTunjangan = await getDefaultAccount(currentCompany.id, 'expense');
         const bebanBpjsKes = await getDefaultAccount(currentCompany.id, 'expense');
@@ -587,7 +527,6 @@ export default function Payroll() {
         }
       }
 
-      // Buat master journal
       if (masterEntries.length > 0) {
         const masterJournalIdResult = await createGeneralJournal(
           currentCompany.id,
@@ -598,15 +537,11 @@ export default function Payroll() {
           0,
           masterEntries
         );
-        if (!masterJournalIdResult) {
-          throw new Error('Gagal membuat master journal');
-        }
+        if (!masterJournalIdResult) throw new Error('Gagal membuat master journal');
         masterJournalId = masterJournalIdResult;
       }
 
-      // ==========================================================
-      // 2. BUAT JURNAL PER KARYAWAN
-      // ==========================================================
+      // ========== 2. JURNAL PER KARYAWAN ==========
       for (const row of draftRows) {
         try {
           const bank = bankAccounts.find(b => b.id === row.bank_account_id);
@@ -716,10 +651,7 @@ export default function Payroll() {
             entries
           );
 
-          if (!journalId) {
-            failCount++;
-            continue;
-          }
+          if (!journalId) { failCount++; continue; }
 
           await supabase
             .from('payroll')
@@ -747,7 +679,7 @@ export default function Payroll() {
     }
   };
 
-  // ============ RENDER ============
+  // ===================== RENDER =====================
   const filteredRows = rows.filter(r => {
     const matchSearch = r.employee_name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchStatus = filterStatus === 'all' || r.status === filterStatus;
@@ -772,8 +704,7 @@ export default function Payroll() {
             disabled={isLoadingPrevious}
             className="flex items-center gap-2 px-4 py-2.5 border border-border rounded-lg hover:bg-background transition-colors disabled:opacity-50"
           >
-            <Copy className="w-4 h-4" />
-            Copy Previous Month
+            <Copy className="w-4 h-4" /> Copy Previous Month
           </button>
           <button
             onClick={addRow}
@@ -826,8 +757,7 @@ export default function Payroll() {
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-background transition-colors disabled:opacity-50"
           >
-            <Save className="w-4 h-4" />
-            {saving ? 'Menyimpan...' : 'Simpan Semua'}
+            <Save className="w-4 h-4" /> {saving ? 'Menyimpan...' : 'Simpan Semua'}
           </button>
           <button
             onClick={postAll}
@@ -889,11 +819,21 @@ export default function Payroll() {
                         className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
                       />
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      {formatCurrency(row.bpjs_kesehatan)}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.bpjs_kesehatan}
+                        onChange={(e) => updateRow(idx, 'bpjs_kesehatan', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      {formatCurrency(row.bpjs_tk)}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={row.bpjs_tk}
+                        onChange={(e) => updateRow(idx, 'bpjs_tk', Number(e.target.value) || 0)}
+                        className="w-full px-2 py-1 border border-transparent hover:border-border rounded focus:border-accent focus:outline-none bg-transparent text-right font-mono"
+                      />
                     </td>
                     <td className="px-3 py-2">
                       <input
@@ -938,7 +878,7 @@ export default function Payroll() {
                       >
                         <option value={0}>-- Pilih --</option>
                         {bankAccounts.map(b => (
-                          <option key={b.id} value={b.id}>{b.code}</option>
+                          <option key={b.id} value={b.id}>{b.code} - {b.name}</option>
                         ))}
                       </select>
                     </td>

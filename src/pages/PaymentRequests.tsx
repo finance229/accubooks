@@ -272,55 +272,77 @@ export default function PaymentRequests() {
   // CREATE PAYMENT REQUEST
   // ============================================
   const handleAddRequest = async () => {
-    if (!newRequest.description || !newRequest.amount) {
-      alert('Lengkapi deskripsi dan jumlah');
-      return;
-    }
-    if (!attachmentFile) {
-      alert('Upload bukti pendukung (foto/PDF) wajib');
-      return;
-    }
+  // Validasi input
+  if (!newRequest.description || !newRequest.amount) {
+    alert('Lengkapi deskripsi dan jumlah');
+    return;
+  }
+  if (!attachmentFile) {
+    alert('Upload bukti pendukung (foto/PDF) wajib');
+    return;
+  }
 
-    setUploading(true);
-    const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
-    if (!uploadResult.success) {
-      alert('Gagal upload bukti: ' + uploadResult.error);
-      setUploading(false);
-      return;
-    }
+  setUploading(true);
 
-    const year = new Date().getFullYear();
-    const count = requests.length + 1;
-    const requestNumber = `PR/${year}/${String(count).padStart(4, '0')}`;
-
-    const { data, error } = await supabase
-      .from('payment_requests')
-      .insert([{
-        company_id: currentCompany!.id,
-        request_number: requestNumber,
-        request_date: newRequest.request_date,
-        requester_name: user?.name || user?.email || 'Staff',
-        requester_email: user?.email,
-        description: newRequest.description,
-        amount: parseInt(newRequest.amount) || 0,
-        bank_name: newRequest.bank_name,
-        bank_account_number: newRequest.bank_account_number,
-        bank_account_name: newRequest.bank_account_name,
-        attachment_url: uploadResult.fileUrl,
-        status: 'draft',
-      }])
-      .select();
-
-    if (!error && data) {
-      setRequests([data[0], ...requests]);
-      setShowAddModal(false);
-      setNewRequest({ description: '', amount: '', request_date: new Date().toISOString().split('T')[0], bank_name: '', bank_account_number: '', bank_account_name: '' });
-      setAttachmentFile(null);
-    } else {
-      alert('Gagal simpan: ' + error?.message);
-    }
+  // 1. Upload file ke Google Drive
+  const uploadResult = await uploadToGoogleDrive(attachmentFile, 'payment_requests');
+  if (!uploadResult.success) {
+    alert('Gagal upload bukti: ' + uploadResult.error);
     setUploading(false);
-  };
+    return;
+  }
+
+  // 2. Generate nomor request dari DATABASE (AMAN)
+  const year = new Date().getFullYear();
+  const { data: requestNumber, error: seqError } = await supabase.rpc(
+    'get_next_request_number',
+    { p_company_id: currentCompany!.id, p_year: year }
+  );
+
+  if (seqError || !requestNumber) {
+    alert('Gagal generate nomor request: ' + seqError?.message);
+    setUploading(false);
+    return;
+  }
+
+  // 3. Insert ke database dengan nomor yang sudah di-generate
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .insert([{
+      company_id: currentCompany!.id,
+      request_number: requestNumber,            // 🔥 PAKAI HASIL RPC
+      request_date: newRequest.request_date,
+      requester_name: user?.name || user?.email || 'Staff',
+      requester_email: user?.email,
+      description: newRequest.description,
+      amount: parseInt(newRequest.amount) || 0,
+      bank_name: newRequest.bank_name,
+      bank_account_number: newRequest.bank_account_number,
+      bank_account_name: newRequest.bank_account_name,
+      attachment_url: uploadResult.fileUrl,
+      status: 'draft',
+    }])
+    .select();
+
+  // 4. Handle response
+  if (!error && data) {
+    setRequests([data[0], ...requests]);
+    setShowAddModal(false);
+    setNewRequest({
+      description: '',
+      amount: '',
+      request_date: new Date().toISOString().split('T')[0],
+      bank_name: '',
+      bank_account_number: '',
+      bank_account_name: '',
+    });
+    setAttachmentFile(null);
+  } else {
+    alert('Gagal simpan: ' + error?.message);
+  }
+
+  setUploading(false);
+};
 
   // ============================================
   // SUBMIT PAYMENT REQUEST

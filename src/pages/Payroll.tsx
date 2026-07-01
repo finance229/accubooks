@@ -660,7 +660,7 @@ export default function Payroll() {
             });
           }
 
-          // 🔥 KREDIT (SUDAH LENGKAP DENGAN BPJS & PPH21)
+          // 🔥 KREDIT (LENGKAP DENGAN BPJS & PPH21)
           entries.push({
             account_id: bank.id,
             account_code: bank.code,

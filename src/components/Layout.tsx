@@ -65,6 +65,7 @@ const menuGroups: MenuGroup[] = [
       { name: 'Dokumen', to: '/documents', icon: FolderOpen },
       { name: 'Fixed Assets', to: '/fixed-assets', icon: TrendingUp },
       { name: 'Transaksi Berulang', to: '/recurring-transactions', icon: Repeat },
+      { name: 'Payroll', to: '/payroll', icon: Receipt },
     ]
   },
   {

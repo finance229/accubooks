@@ -346,7 +346,7 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.keterangan || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.unit || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_pol || '-'}</td>
-        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_spk || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_kontrak || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga || 0)}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
       </tr>
@@ -360,6 +360,6 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
   const remainingAmount = grandTotal - paidAmount;
 
   return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', {
-    tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No. Kontrak', 'Harga', 'Jumlah']
+    tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No Kontrak', 'Harga', 'Jumlah']
   });
 }

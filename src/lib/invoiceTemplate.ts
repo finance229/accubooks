@@ -360,6 +360,6 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
   const remainingAmount = grandTotal - paidAmount;
 
   return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', {
-    tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No. SPK', 'Harga', 'Jumlah']
+    tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No. Kontrak', 'Harga', 'Jumlah']
   });
 }

@@ -192,6 +192,7 @@ export const getBankAccounts = async (companyId: number) => {
   try {
     const suffix = getCompanySuffix(companyId);
     
+    // 🔥 Ambil SEMUA akun dengan tipe 'asset' (bank, kas, dll)
     const { data, error } = await supabase
       .from('coa')
       .select('id, code, name, account_number')
@@ -199,7 +200,6 @@ export const getBankAccounts = async (companyId: number) => {
       .eq('suffix', suffix)
       .eq('is_active', true)
       .eq('type', 'asset')
-      .or('name.ilike.%bank%,name.ilike.%kas%')
       .order('code');
     
     if (error) {
@@ -207,7 +207,18 @@ export const getBankAccounts = async (companyId: number) => {
       return [];
     }
     
-    return data || [];
+    // 🔥 Filter tambahan: ambil yang namanya mengandung 'bank' atau 'kas'
+    // Tapi jika tidak ada, tampilkan semua aset
+    let bankAccounts = data || [];
+    
+    // Coba filter dulu yang mengandung bank/kas
+    const filtered = bankAccounts.filter(acc => 
+      acc.name.toLowerCase().includes('bank') || 
+      acc.name.toLowerCase().includes('kas')
+    );
+    
+    // Kalau ada hasil filter, pakai itu. Kalau tidak, pakai semua aset.
+    return filtered.length > 0 ? filtered : bankAccounts;
   } catch (err) {
     console.error('Error getBankAccounts:', err);
     return [];

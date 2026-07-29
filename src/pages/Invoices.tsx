@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, FileText } from 'lucide-react';
+import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, FileText, Undo2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -28,6 +28,7 @@ type Invoice = {
   customer_id: number;
   customer_name: string;
   project_id: number | null;
+  bank_account_id: number | null;
   subtotal: number;
   ppn: number;
   total: number;
@@ -69,6 +70,12 @@ type Project = {
   spent: number;
 };
 
+type BankAccount = {
+  id: number;
+  code: string;
+  name: string;
+};
+
 export default function Invoices() {
   const navigate = useNavigate();
   const { currentCompany } = useCompany();
@@ -76,7 +83,7 @@ export default function Invoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -96,17 +103,20 @@ export default function Invoices() {
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
-  // ============ STATE UNTUK TEMPLATE & PPN ============
   const [selectedTemplate, setSelectedTemplate] = useState('general');
   const [includePpn, setIncludePpn] = useState(false);
   const [includePph, setIncludePph] = useState(false);
   
-  // ============ STATE EDIT ============
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
-  
-  // ============ STATE ITEMS UNTUK DETAIL MODAL ============
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
+  
+  // ============ STATE DOWNLOAD MODAL ============
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadInvoice, setDownloadInvoice] = useState<Invoice | null>(null);
+  const [downloadType, setDownloadType] = useState<'invoice' | 'kwitansi'>('invoice');
+  const [showSignature, setShowSignature] = useState(true);
+  const [selectedBankIdDownload, setSelectedBankIdDownload] = useState(0);
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -114,6 +124,7 @@ export default function Invoices() {
     invoice_date: new Date().toISOString().split('T')[0],
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     project_id: null as number | null,
+    bank_account_id: null as number | null,
     notes: '',
     items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: {} }] as InvoiceItem[],
   });
@@ -121,11 +132,9 @@ export default function Invoices() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
-  // 🔥 CEK SUFFIX PERUSAHAAN
   const suffix = currentCompany ? getCompanySuffix(currentCompany.id) : 'A';
   const isMMC = suffix === 'B';
 
-  // 🔥 FORCE GENERAL UNTUK NON-MMC
   useEffect(() => {
     if (!isMMC && selectedTemplate !== 'general') {
       setSelectedTemplate('general');
@@ -180,7 +189,6 @@ export default function Invoices() {
     setBankAccounts(banks);
   };
 
-  // ============ LOAD INVOICE FOR EDIT ============
   const loadInvoiceForEdit = async (invoiceId: number) => {
     if (!currentCompany?.id) return;
     try {
@@ -204,9 +212,10 @@ export default function Invoices() {
         invoice_date: invoice.invoice_date,
         due_date: invoice.due_date,
         project_id: invoice.project_id,
+        bank_account_id: invoice.bank_account_id || null,
         notes: invoice.notes || '',
         items: items && items.length > 0 ? items.map((item: any) => ({
-          description: item.description || '',  // 🔥 PASTIKAN DESCRIPTION TERLOAD
+          description: item.description || '',
           quantity: item.quantity || 1,
           unit_price: item.unit_price || 0,
           discount: item.discount || 0,
@@ -231,14 +240,12 @@ export default function Invoices() {
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
-  // ============ UPDATE ITEM META - FIX DESCRIPTION ============
   const updateItemMeta = (index: number, fieldKey: string, value: any) => {
     const newItems = [...formData.items];
     const item = newItems[index];
     if (!item.meta) item.meta = {};
     item.meta[fieldKey] = value;
 
-    // 🔥 JIKA FIELD ADALAH DESCRIPTION, SIMPAN KE item.description
     if (fieldKey === 'description') {
       item.description = value;
     }
@@ -272,7 +279,6 @@ export default function Invoices() {
     setFormData({ ...formData, items: newItems });
   };
 
-  // ============ ADD ITEM - FIX DESCRIPTION ============
   const addItem = () => {
     const fields = getTemplateFields(selectedTemplate);
     const newMeta: any = {};
@@ -280,7 +286,7 @@ export default function Invoices() {
     setFormData({
       ...formData,
       items: [...formData.items, { 
-        description: '',  // 🔥 TAMBAHKAN DESCRIPTION
+        description: '',
         quantity: 1, 
         unit_price: 0, 
         discount: 0, 
@@ -352,7 +358,6 @@ export default function Invoices() {
     }
   };
 
-  // ============ HANDLE VIEW DETAIL - FETCH ITEMS ============
   const handleViewDetail = async (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     const { data } = await supabase
@@ -363,14 +368,12 @@ export default function Invoices() {
     setShowDetailModal(true);
   };
 
-  // ============ SAVE INVOICE (CREATE OR UPDATE) - FIX DESCRIPTION ============
   const handleSaveInvoice = async () => {
     if (!formData.customer_id || formData.items.length === 0) {
       alert('Lengkapi customer dan minimal 1 item');
       return;
     }
 
-    // 🔥 VALIDASI DESKRIPSI
     const emptyDesc = formData.items.some(item => !item.description || item.description.trim() === '');
     if (emptyDesc) {
       alert('Semua item harus memiliki deskripsi!');
@@ -379,9 +382,8 @@ export default function Invoices() {
 
     if (!currentCompany?.id) return;
 
-    // 🔥 PASTIKAN DESCRIPTION TERBAWA
     const itemsToInsert = formData.items.map(item => ({
-      description: item.description || '',  // 🔥 INI YANG PENTING
+      description: item.description || '',
       quantity: item.quantity || 1,
       unit_price: item.unit_price || 0,
       discount: item.discount || 0,
@@ -389,10 +391,9 @@ export default function Invoices() {
       meta: item.meta || {},
     }));
 
-    console.log('📝 Items to save:', itemsToInsert); // DEBUG
+    console.log('📝 Items to save:', itemsToInsert);
 
     if (isEditMode && editingInvoiceId) {
-      // ========== UPDATE INVOICE ==========
       const { error: updateError } = await supabase
         .from('invoices')
         .update({
@@ -401,6 +402,7 @@ export default function Invoices() {
           customer_id: formData.customer_id,
           customer_name: formData.customer_name,
           project_id: formData.project_id,
+          bank_account_id: formData.bank_account_id,
           subtotal: subtotal,
           ppn: ppn,
           total: total,
@@ -416,17 +418,15 @@ export default function Invoices() {
         return;
       }
 
-      // Delete old items
       await supabase
         .from('invoice_items')
         .delete()
         .eq('invoice_id', editingInvoiceId);
 
-      // Insert new items with description
       for (const item of itemsToInsert) {
         await supabase.from('invoice_items').insert([{
           invoice_id: editingInvoiceId,
-          description: item.description,  // 🔥 DESCRIPTION TERSIMPAN
+          description: item.description,
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount: item.discount,
@@ -439,7 +439,6 @@ export default function Invoices() {
       setIsEditMode(false);
       setEditingInvoiceId(null);
     } else {
-      // ========== CREATE NEW INVOICE ==========
       const projectCode = formData.project_id 
         ? projects.find(p => p.id === formData.project_id)?.code || null
         : null;
@@ -459,6 +458,7 @@ export default function Invoices() {
           customer_id: formData.customer_id,
           customer_name: formData.customer_name,
           project_id: formData.project_id,
+          bank_account_id: formData.bank_account_id,
           subtotal: subtotal,
           ppn: ppn,
           total: total,
@@ -484,7 +484,7 @@ export default function Invoices() {
       for (const item of itemsToInsert) {
         await supabase.from('invoice_items').insert([{
           invoice_id: invoiceId,
-          description: item.description,  // 🔥 DESCRIPTION TERSIMPAN
+          description: item.description,
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount: item.discount,
@@ -508,6 +508,7 @@ export default function Invoices() {
       invoice_date: new Date().toISOString().split('T')[0],
       due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       project_id: null,
+      bank_account_id: null,
       notes: '',
       items: [{ description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: {} }],
     });
@@ -570,11 +571,71 @@ export default function Invoices() {
     }
   };
 
+  // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
+  const handleReverseVerify = async (invoice: Invoice) => {
+    if (user?.role !== 'super_admin') {
+      alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
+      return;
+    }
+
+    if (!confirm(`Yakin ingin membatalkan verifikasi invoice ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
+      return;
+    }
+
+    try {
+      const { data: journals, error: jError } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('reference_type', 'INVOICE')
+        .eq('reference_id', invoice.id);
+
+      if (jError) throw jError;
+
+      if (journals && journals.length > 0) {
+        const journalIds = journals.map(j => j.id);
+        
+        const { error: linesError } = await supabase
+          .from('journal_lines')
+          .delete()
+          .in('journal_id', journalIds);
+        
+        if (linesError) throw linesError;
+
+        const { error: deleteError } = await supabase
+          .from('journals')
+          .delete()
+          .in('id', journalIds);
+        
+        if (deleteError) throw deleteError;
+
+        console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk invoice ${invoice.id}`);
+      }
+
+      const { error: updateError } = await supabase
+        .from('invoices')
+        .update({ 
+          status: 'draft',
+          verified_by: null,
+          verified_at: null,
+        })
+        .eq('id', invoice.id);
+
+      if (updateError) throw updateError;
+
+      alert(`✅ Verifikasi invoice ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT.`);
+      fetchInvoices();
+
+    } catch (error) {
+      console.error('Error reverse verify:', error);
+      alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     const remaining = invoice.total - (invoice.paid_amount || 0);
     setPaymentAmount(remaining.toString());
-    setSelectedBankId(0);
+    setSelectedBankId(invoice.bank_account_id || 0);
     setIncludePph(false);
     setShowPaymentModal(true);
   };
@@ -587,20 +648,27 @@ export default function Invoices() {
       alert('Masukkan jumlah pembayaran yang valid');
       return;
     }
-    if (!selectedBankId) {
-      alert('Pilih akun bank/kas');
+    
+    // Pakai rekening dari invoice, fallback ke pilihan manual
+    let bankAccountId = selectedInvoice.bank_account_id;
+    if (!bankAccountId) {
+      bankAccountId = selectedBankId;
+    }
+    
+    if (!bankAccountId) {
+      alert('Pilih akun bank/kas (invoice tidak memiliki rekening default)');
+      return;
+    }
+    
+    const bankAccount = bankAccounts.find(b => b.id === bankAccountId);
+    if (!bankAccount) {
+      alert('Akun bank tidak ditemukan');
       return;
     }
     
     const currentPaid = selectedInvoice.paid_amount || 0;
     const newPaid = currentPaid + amount;
     const newStatus = newPaid >= selectedInvoice.total ? 'paid' : 'partial';
-    
-    const bankAccount = bankAccounts.find(b => b.id === selectedBankId);
-    if (!bankAccount) {
-      alert('Akun bank tidak ditemukan');
-      return;
-    }
     
     const receivableAcc = await getDefaultAccount(currentCompany!.id, 'receivable');
     if (!receivableAcc) {
@@ -648,7 +716,7 @@ export default function Invoices() {
       }
 
       if (!pphPrepaidAcc) {
-        alert('Akun PPh 23 (PPh 23 Dibayar Dimuka) tidak ditemukan di COA. Pastikan ada akun dengan nama "PPh 23 Dibayar Dimuka" atau "PPh 23" dengan tipe aset/tax.');
+        alert('Akun PPh 23 (PPh 23 Dibayar Dimuka) tidak ditemukan di COA.');
         return;
       }
 
@@ -730,7 +798,7 @@ export default function Invoices() {
       amount: amount - pphAmount,
       pph_amount: pphAmount,
       payment_method: paymentMethod,
-      bank_account_id: selectedBankId,
+      bank_account_id: bankAccount.id,
       created_by: user?.email,
     }]);
 
@@ -741,41 +809,24 @@ export default function Invoices() {
     fetchInvoices();
   };
 
-  const handleDownloadPDF = async (invoice: Invoice) => {
-    try {
-      const { data: items } = await supabase
-        .from('invoice_items')
-        .select('*')
-        .eq('invoice_id', invoice.id);
-      
-      const { data: company } = await supabase
-        .from('companies')
-        .select('*')
-        .eq('id', currentCompany?.id)
-        .single();
-      
-      const { data: customer } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('id', invoice.customer_id)
-        .single();
-      
-      const html = generateInvoiceHTML(invoice, company, customer, items || []);
-      const win = window.open();
-      win?.document.write(html);
-      win?.document.close();
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Gagal generate PDF');
-    }
+  // ============ OPEN DOWNLOAD MODAL ============
+  const openDownloadModal = (invoice: Invoice, type: 'invoice' | 'kwitansi') => {
+    setDownloadInvoice(invoice);
+    setDownloadType(type);
+    setShowSignature(true);
+    setSelectedBankIdDownload(invoice.bank_account_id || 0);
+    setShowDownloadModal(true);
   };
 
-  const handlePrintKwitansi = async (invoice: Invoice) => {
+  // ============ GENERATE PDF DARI MODAL ============
+  const handleGenerateDownload = async () => {
+    if (!downloadInvoice) return;
+
     try {
       const { data: items } = await supabase
         .from('invoice_items')
         .select('*')
-        .eq('invoice_id', invoice.id);
+        .eq('invoice_id', downloadInvoice.id);
       
       const { data: company } = await supabase
         .from('companies')
@@ -786,25 +837,63 @@ export default function Invoices() {
       const { data: customer } = await supabase
         .from('contacts')
         .select('*')
-        .eq('id', invoice.customer_id)
+        .eq('id', downloadInvoice.customer_id)
         .single();
-      
-      const { data: payments } = await supabase
-        .from('invoice_payments')
-        .select('*')
-        .eq('invoice_id', invoice.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      const payment = payments?.[0] || null;
-      
-      const html = generateKwitansiHTML(invoice, company, customer, items || [], payment);
+
+      let bankAccount = null;
+      if (selectedBankIdDownload) {
+        const { data: bankData } = await supabase
+          .from('coa')
+          .select('id, code, name')
+          .eq('id', selectedBankIdDownload)
+          .single();
+        bankAccount = bankData;
+      }
+
+      if (!bankAccount) {
+        bankAccount = {
+          id: 0,
+          code: '1102',
+          name: company?.bank_name || 'Bank Default'
+        };
+      }
+
+      let html = '';
+      if (downloadType === 'invoice') {
+        html = generateInvoiceHTML(
+          downloadInvoice, 
+          company, 
+          customer, 
+          items || [],
+          bankAccount,
+          showSignature
+        );
+      } else {
+        const { data: payments } = await supabase
+          .from('invoice_payments')
+          .select('*')
+          .eq('invoice_id', downloadInvoice.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        
+        html = generateKwitansiHTML(
+          downloadInvoice, 
+          company, 
+          customer, 
+          items || [],
+          payments?.[0] || null,
+          bankAccount,
+          showSignature
+        );
+      }
+
       const win = window.open('', '_blank');
       win?.document.write(html);
       win?.document.close();
+      setShowDownloadModal(false);
     } catch (error) {
-      console.error('Error printing kwitansi:', error);
-      alert('Gagal cetak kwitansi');
+      console.error('Error generating PDF:', error);
+      alert('Gagal generate PDF');
     }
   };
 
@@ -1000,16 +1089,30 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => handleViewDetail(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
+                        
+                        {invoice.status === 'verified' && user?.role === 'super_admin' && (
+                          <button 
+                            onClick={() => handleReverseVerify(invoice)}
+                            className="p-2 text-text-muted hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors"
+                            title="Batalkan Verifikasi (Super Admin)"
+                          >
+                            <Undo2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        
                         {invoice.status === 'draft' && (
                           <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>
                         )}
                         {(invoice.status === 'draft' || invoice.status === 'sent') && <button onClick={() => handleVerifyInvoice(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><CheckCircle className="w-4 h-4" /></button>}
                         {invoice.status !== 'paid' && <button onClick={() => handleOpenPaymentModal(invoice)} className="p-2 text-text-muted hover:text-warning hover:bg-warning/10 rounded-lg"><DollarSign className="w-4 h-4" /></button>}
-                        <button onClick={() => handleDownloadPDF(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
+                        
+                        <button onClick={() => openDownloadModal(invoice, 'invoice')} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Download className="w-4 h-4" /></button>
+                        
                         <button onClick={() => handleSendEmail(invoice)} className="p-2 text-text-muted hover:text-success hover:bg-success/10 rounded-lg"><Send className="w-4 h-4" /></button>
+                        
                         {(invoice.status === 'verified' || invoice.status === 'partial' || invoice.status === 'paid') && (
                           <button
-                            onClick={() => handlePrintKwitansi(invoice)}
+                            onClick={() => openDownloadModal(invoice, 'kwitansi')}
                             className="p-2 text-text-muted hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                             title="Cetak Kwitansi"
                           >
@@ -1127,6 +1230,26 @@ export default function Invoices() {
                   </select>
                   <button onClick={() => setShowNewProjectModal(true)} className="px-4 py-2 text-accent border border-accent rounded-lg">+ Baru</button>
                 </div>
+              </div>
+
+              {/* 🔥 Pilih Rekening Bank */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Rekening Bank / Kas *</label>
+                <select
+                  value={formData.bank_account_id || ''}
+                  onChange={(e) => setFormData({ ...formData, bank_account_id: parseInt(e.target.value) || null })}
+                  className="w-full px-4 py-2 border rounded-lg"
+                >
+                  <option value="">-- Pilih Rekening --</option>
+                  {bankAccounts.map(bank => (
+                    <option key={bank.id} value={bank.id}>
+                      {bank.code} - {bank.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-text-muted mt-1">
+                  Rekening ini akan digunakan untuk pembayaran dan muncul di invoice
+                </p>
               </div>
 
               {/* Item Table */}
@@ -1256,6 +1379,9 @@ export default function Invoices() {
                   <option value={0}>-- Pilih Akun --</option>
                   {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
+                {selectedInvoice.bank_account_id && (
+                  <p className="text-xs text-text-muted mt-1">Default dari invoice: {bankAccounts.find(b => b.id === selectedInvoice.bank_account_id)?.name || '-'}</p>
+                )}
               </div>
               <div>
                 <label className="flex items-center gap-2">
@@ -1333,9 +1459,12 @@ export default function Invoices() {
               <p><strong>Status:</strong> {getStatusLabel(selectedInvoice.status)}</p>
               <p><strong>Template:</strong> {getTemplateLabel(selectedInvoice.template || 'general')}</p>
               {selectedInvoice.include_ppn && <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn_amount || 0)}</p>}
+              {selectedInvoice.bank_account_id && (
+                <p><strong>Rekening:</strong> {bankAccounts.find(b => b.id === selectedInvoice.bank_account_id)?.name || '-'}</p>
+              )}
             </div>
 
-            {/* 🔥 ITEMS LIST - SEKARANG MUNCUL */}
+            {/* Items List */}
             <div className="mt-4 pt-4 border-t border-border">
               <p className="text-sm font-medium text-text mb-2">📋 Items</p>
               {invoiceItems.length === 0 ? (
@@ -1364,21 +1493,99 @@ export default function Invoices() {
               )}
             </div>
 
-            {/* 🔥 DOKUMEN TERKAIT */}
-            {selectedInvoice && (
-              <div className="mt-4 pt-4 border-t border-border">
-                <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
-                <button
-                  onClick={() => navigate(`/documents?ref=invoice&id=${selectedInvoice.id}`)}
-                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                >
-                  <FileText className="w-4 h-4" />
-                  Lihat dokumen untuk invoice ini
-                </button>
-              </div>
-            )}
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
+              <button
+                onClick={() => navigate(`/documents?ref=invoice&id=${selectedInvoice.id}`)}
+                className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+              >
+                <FileText className="w-4 h-4" />
+                Lihat dokumen untuk invoice ini
+              </button>
+            </div>
             <div className="flex justify-end mt-6">
-              <button onClick={() => handleDownloadPDF(selectedInvoice)} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button>
+              <button onClick={() => openDownloadModal(selectedInvoice, 'invoice')} className="px-4 py-2 bg-accent text-white rounded-lg">Download PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ MODAL DOWNLOAD ============ */}
+      {showDownloadModal && downloadInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-display text-xl font-bold">
+                {downloadType === 'invoice' ? 'Download Invoice' : 'Cetak Kwitansi'}
+              </h2>
+              <button 
+                onClick={() => setShowDownloadModal(false)} 
+                className="text-text-muted hover:text-text"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-text-muted">Invoice</p>
+                <p className="font-semibold">{downloadInvoice.invoice_number}</p>
+              </div>
+              <div>
+                <p className="text-sm text-text-muted">Customer</p>
+                <p className="font-semibold">{downloadInvoice.customer_name}</p>
+              </div>
+
+              {/* Pilih Rekening */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Rekening Bank / Kas</label>
+                <select
+                  value={selectedBankIdDownload || ''}
+                  onChange={(e) => setSelectedBankIdDownload(parseInt(e.target.value) || 0)}
+                  className="w-full px-4 py-2 border rounded-lg"
+                >
+                  <option value={0}>-- Pilih Rekening --</option>
+                  {bankAccounts.map(bank => (
+                    <option key={bank.id} value={bank.id}>
+                      {bank.code} - {bank.name}
+                    </option>
+                  ))}
+                </select>
+                {downloadInvoice.bank_account_id && (
+                  <p className="text-xs text-text-muted mt-1">
+                    Default: {bankAccounts.find(b => b.id === downloadInvoice.bank_account_id)?.name || '-'}
+                  </p>
+                )}
+              </div>
+
+              {/* Tampilkan Tanda Tangan */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="showSignature"
+                  checked={showSignature}
+                  onChange={(e) => setShowSignature(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <label htmlFor="showSignature" className="text-sm font-medium">
+                  Tampilkan Tanda Tangan
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                onClick={() => setShowDownloadModal(false)} 
+                className="px-4 py-2 border border-border rounded-lg hover:bg-background"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={handleGenerateDownload} 
+                className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover"
+              >
+                {downloadType === 'invoice' ? 'Download PDF' : 'Cetak Kwitansi'}
+              </button>
             </div>
           </div>
         </div>

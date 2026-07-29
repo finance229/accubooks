@@ -116,7 +116,6 @@ export default function Invoices() {
   const [downloadInvoice, setDownloadInvoice] = useState<Invoice | null>(null);
   const [downloadType, setDownloadType] = useState<'invoice' | 'kwitansi'>('invoice');
   const [showSignature, setShowSignature] = useState(true);
-  const [selectedBankIdDownload, setSelectedBankIdDownload] = useState(0);
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -215,7 +214,7 @@ export default function Invoices() {
         bank_account_id: invoice.bank_account_id || null,
         notes: invoice.notes || '',
         items: items && items.length > 0 ? items.map((item: any) => ({
-          description: item.description || '',
+          description: item.description || item.meta?.description || '',
           quantity: item.quantity || 1,
           unit_price: item.unit_price || 0,
           discount: item.discount || 0,
@@ -374,7 +373,11 @@ export default function Invoices() {
       return;
     }
 
-    const emptyDesc = formData.items.some(item => !item.description || item.description.trim() === '');
+    // 🔥 VALIDASI DESKRIPSI - CEK description ATAU meta.description
+    const emptyDesc = formData.items.some(item => {
+      const desc = item.description || item.meta?.description || '';
+      return desc.trim() === '';
+    });
     if (emptyDesc) {
       alert('Semua item harus memiliki deskripsi!');
       return;
@@ -382,8 +385,9 @@ export default function Invoices() {
 
     if (!currentCompany?.id) return;
 
+    // 🔥 AMBIL DESKRIPSI DARI item.description ATAU meta.description
     const itemsToInsert = formData.items.map(item => ({
-      description: item.description || '',
+      description: item.description || item.meta?.description || '',
       quantity: item.quantity || 1,
       unit_price: item.unit_price || 0,
       discount: item.discount || 0,
@@ -572,68 +576,62 @@ export default function Invoices() {
   };
 
   // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
- // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
-const handleReverseVerify = async (invoice: Invoice) => {
-  if (user?.role !== 'super_admin') {
-    alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
-    return;
-  }
-
-  if (!confirm(`Yakin ingin membatalkan verifikasi invoice ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
-    return;
-  }
-
-  try {
-    // 1. Cari jurnal yang terkait dengan invoice ini
-    const { data: journals, error: jError } = await supabase
-      .from('journals')
-      .select('id')
-      .eq('reference_type', 'INVOICE')
-      .eq('reference_id', invoice.id);
-
-    if (jError) throw jError;
-
-    if (journals && journals.length > 0) {
-      const journalIds = journals.map(j => j.id);
-      
-      // 2. Hapus journal_lines
-      const { error: linesError } = await supabase
-        .from('journal_lines')
-        .delete()
-        .in('journal_id', journalIds);
-      
-      if (linesError) throw linesError;
-
-      // 3. Hapus journals
-      const { error: deleteError } = await supabase
-        .from('journals')
-        .delete()
-        .in('id', journalIds);
-      
-      if (deleteError) throw deleteError;
-
-      console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk invoice ${invoice.id}`);
+  const handleReverseVerify = async (invoice: Invoice) => {
+    if (user?.role !== 'super_admin') {
+      alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
+      return;
     }
 
-    // 4. Update status invoice kembali ke draft (HANYA STATUS, tanpa verified_at/verified_by)
-    const { error: updateError } = await supabase
-      .from('invoices')
-      .update({ 
-        status: 'draft'
-        // 🔥 Hapus verified_by dan verified_at karena kolom tidak ada
-      })
-      .eq('id', invoice.id);
+    if (!confirm(`Yakin ingin membatalkan verifikasi invoice ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
+      return;
+    }
 
-    if (updateError) throw updateError;
+    try {
+      const { data: journals, error: jError } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('reference_type', 'INVOICE')
+        .eq('reference_id', invoice.id);
 
-    alert(`✅ Verifikasi invoice ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT.`);
-    fetchInvoices();
+      if (jError) throw jError;
 
-  } catch (error) {
-    console.error('Error reverse verify:', error);
-    alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
-  }
-};
+      if (journals && journals.length > 0) {
+        const journalIds = journals.map(j => j.id);
+        
+        const { error: linesError } = await supabase
+          .from('journal_lines')
+          .delete()
+          .in('journal_id', journalIds);
+        
+        if (linesError) throw linesError;
+
+        const { error: deleteError } = await supabase
+          .from('journals')
+          .delete()
+          .in('id', journalIds);
+        
+        if (deleteError) throw deleteError;
+
+        console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk invoice ${invoice.id}`);
+      }
+
+      const { error: updateError } = await supabase
+        .from('invoices')
+        .update({ 
+          status: 'draft'
+        })
+        .eq('id', invoice.id);
+
+      if (updateError) throw updateError;
+
+      alert(`✅ Verifikasi invoice ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT.`);
+      fetchInvoices();
+
+    } catch (error) {
+      console.error('Error reverse verify:', error);
+      alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
 
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
@@ -653,7 +651,6 @@ const handleReverseVerify = async (invoice: Invoice) => {
       return;
     }
     
-    // Pakai rekening dari invoice, fallback ke pilihan manual
     let bankAccountId = selectedInvoice.bank_account_id;
     if (!bankAccountId) {
       bankAccountId = selectedBankId;
@@ -818,7 +815,6 @@ const handleReverseVerify = async (invoice: Invoice) => {
     setDownloadInvoice(invoice);
     setDownloadType(type);
     setShowSignature(true);
-    setSelectedBankIdDownload(invoice.bank_account_id || 0);
     setShowDownloadModal(true);
   };
 
@@ -844,12 +840,13 @@ const handleReverseVerify = async (invoice: Invoice) => {
         .eq('id', downloadInvoice.customer_id)
         .single();
 
+      // 🔥 PAKAI REKENING DARI INVOICE
       let bankAccount = null;
-      if (selectedBankIdDownload) {
+      if (downloadInvoice.bank_account_id) {
         const { data: bankData } = await supabase
           .from('coa')
           .select('id, code, name')
-          .eq('id', selectedBankIdDownload)
+          .eq('id', downloadInvoice.bank_account_id)
           .single();
         bankAccount = bankData;
       }
@@ -1236,7 +1233,7 @@ const handleReverseVerify = async (invoice: Invoice) => {
                 </div>
               </div>
 
-              {/* 🔥 Pilih Rekening Bank */}
+              {/* Pilih Rekening Bank */}
               <div>
                 <label className="block text-sm font-medium mb-1">Rekening Bank / Kas *</label>
                 <select
@@ -1539,30 +1536,14 @@ const handleReverseVerify = async (invoice: Invoice) => {
                 <p className="text-sm text-text-muted">Customer</p>
                 <p className="font-semibold">{downloadInvoice.customer_name}</p>
               </div>
-
-              {/* Pilih Rekening */}
               <div>
-                <label className="block text-sm font-medium mb-1">Rekening Bank / Kas</label>
-                <select
-                  value={selectedBankIdDownload || ''}
-                  onChange={(e) => setSelectedBankIdDownload(parseInt(e.target.value) || 0)}
-                  className="w-full px-4 py-2 border rounded-lg"
-                >
-                  <option value={0}>-- Pilih Rekening --</option>
-                  {bankAccounts.map(bank => (
-                    <option key={bank.id} value={bank.id}>
-                      {bank.code} - {bank.name}
-                    </option>
-                  ))}
-                </select>
-                {downloadInvoice.bank_account_id && (
-                  <p className="text-xs text-text-muted mt-1">
-                    Default: {bankAccounts.find(b => b.id === downloadInvoice.bank_account_id)?.name || '-'}
-                  </p>
-                )}
+                <p className="text-sm text-text-muted">Rekening</p>
+                <p className="font-semibold">
+                  {bankAccounts.find(b => b.id === downloadInvoice.bank_account_id)?.name || 'Default'}
+                </p>
               </div>
 
-              {/* Tampilkan Tanda Tangan */}
+              {/* HANYA CHECKBOX TTD - TANPA DROPDOWN REKENING */}
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"

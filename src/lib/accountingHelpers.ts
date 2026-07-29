@@ -194,23 +194,20 @@ export const getBankAccounts = async (companyId: number) => {
     
     const { data, error } = await supabase
       .from('coa')
-      .select('id, code, name')
+      .select('id, code, name, account_number')
       .eq('company_id', companyId)
       .eq('suffix', suffix)
       .eq('is_active', true)
-      .eq('type', 'asset');
+      .eq('type', 'asset')
+      .or('name.ilike.%bank%,name.ilike.%kas%')
+      .order('code');
     
     if (error) {
       console.error('Error getBankAccounts:', error);
       return [];
     }
     
-    const bankAccounts = (data || []).filter(acc => 
-      acc.name.toLowerCase().includes('bank') || 
-      acc.name.toLowerCase().includes('kas')
-    );
-    
-    return bankAccounts;
+    return data || [];
   } catch (err) {
     console.error('Error getBankAccounts:', err);
     return [];

@@ -24,12 +24,15 @@ export function generateKwitansiHTML(
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  const terbilang = (angka: number) => {
+  // 🔥🔥🔥 TERBILANG - HURUF SEMUA (SAMA DENGAN INVOICE) 🔥🔥🔥
+  function terbilang(angka: number): string {
+    if (angka === 0) return 'Nol';
+    if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
+    
     const satuan = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan'];
     const belasan = ['Sepuluh', 'Sebelas', 'Dua Belas', 'Tiga Belas', 'Empat Belas', 'Lima Belas', 'Enam Belas', 'Tujuh Belas', 'Delapan Belas', 'Sembilan Belas'];
     const puluhan = ['', '', 'Dua Puluh', 'Tiga Puluh', 'Empat Puluh', 'Lima Puluh', 'Enam Puluh', 'Tujuh Puluh', 'Delapan Puluh', 'Sembilan Puluh'];
 
-    if (angka === 0) return 'Nol';
     if (angka < 10) return satuan[angka];
     if (angka < 20) return belasan[angka - 10];
     if (angka < 100) {
@@ -40,20 +43,42 @@ export function generateKwitansiHTML(
     if (angka < 1000) {
       const ratus = Math.floor(angka / 100);
       const sisa = angka % 100;
+      if (ratus === 1 && sisa === 0) return 'Seratus';
+      if (ratus === 1) return 'Seratus ' + terbilang(sisa);
       return satuan[ratus] + ' Ratus' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
     if (angka < 1000000) {
       const ribu = Math.floor(angka / 1000);
       const sisa = angka % 1000;
+      if (ribu === 1 && sisa === 0) return 'Seribu';
+      if (ribu === 1) return 'Seribu ' + terbilang(sisa);
       return terbilang(ribu) + ' Ribu' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
     if (angka < 1000000000) {
       const juta = Math.floor(angka / 1000000);
       const sisa = angka % 1000000;
+      if (juta === 1 && sisa === 0) return 'Satu Juta';
+      if (juta === 1) return 'Satu Juta ' + terbilang(sisa);
       return terbilang(juta) + ' Juta' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
-    return angka.toString();
-  };
+    // 🔥 MILYAR
+    if (angka < 1000000000000) {
+      const milyar = Math.floor(angka / 1000000000);
+      const sisa = angka % 1000000000;
+      if (milyar === 1 && sisa === 0) return 'Satu Milyar';
+      if (milyar === 1) return 'Satu Milyar ' + terbilang(sisa);
+      return terbilang(milyar) + ' Milyar' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+    }
+    // 🔥 TRILIUN (untuk jaga-jaga)
+    if (angka < 1000000000000000) {
+      const triliun = Math.floor(angka / 1000000000000);
+      const sisa = angka % 1000000000000;
+      if (triliun === 1 && sisa === 0) return 'Satu Triliun';
+      if (triliun === 1) return 'Satu Triliun ' + terbilang(sisa);
+      return terbilang(triliun) + ' Triliun' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+    }
+    return angka.toString(); // fallback
+  }
 
   let itemsHtml = '';
   let totalSubtotal = 0;
@@ -75,11 +100,10 @@ export function generateKwitansiHTML(
   const grandTotal = invoice.total || totalSubtotal + ppn;
 
   const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
-  const bankAccountNo = bankAccount?.code || company?.bank_account || '1010000777068';
+  const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
 
-  const signatureImg = showSignature && company?.signature_url 
-    ? `<img src="${company.signature_url}" style="max-width: 120px; max-height: 50px; margin-bottom: 4px;" />` 
-    : '';
+  // 🔥 TERBILANG - HURUF
+  const terbilangText = terbilang(Math.round(grandTotal));
 
   return `<!DOCTYPE html>
 <html>
@@ -112,12 +136,13 @@ export function generateKwitansiHTML(
     .terbilang { margin-top: 16px; padding: 10px 14px; background: #f7f7f7; border-left: 4px solid #000; font-size: 12px; }
     .footer { margin-top: 30px; display: flex; justify-content: space-between; align-items: flex-end; }
     .footer .left { font-size: 11px; color: #555; line-height: 1.6; }
-    .signature-area { text-align: center; min-width: 140px; }
-    .signature-area .signature-img { max-width: 120px; max-height: 50px; margin-bottom: 4px; }
-    .signature-area .line { width: 140px; border-top: 1px solid #000; margin: 4px auto 2px auto; }
-    .signature-area .name { font-size: 13px; font-weight: 600; }
+    .signature-area { text-align: center; min-width: 180px; padding-top: 10px; }
+    .signature-area .signature-img { max-width: 120px; max-height: 60px; margin-bottom: 4px; }
+    .signature-area .line { width: 160px; border-top: 1px solid #000; margin: 2px auto 2px auto; }
+    .signature-area .name { font-size: 13px; font-weight: 600; margin-top: 2px; }
     .signature-area .title { font-size: 11px; color: #555; }
     .signature-area .date { font-size: 11px; color: #555; margin-top: 2px; }
+    .signature-area .stamp { margin-top: 8px; font-size: 10px; color: #999; border: 1px solid #999; padding: 2px 12px; border-radius: 2px; display: inline-block; }
     @media print { body { background: white; padding: 0; } .kwitansi { box-shadow: none; margin: 0; width: 100%; } }
   </style>
 </head>
@@ -179,8 +204,9 @@ export function generateKwitansiHTML(
       <span class="amount">${formatRupiah(grandTotal)}</span>
     </div>
 
+    <!-- 🔥 TERBILANG - HURUF -->
     <div class="terbilang">
-      <strong>Terbilang:</strong> ${terbilang(Math.round(grandTotal))} Rupiah
+      <strong>Terbilang:</strong> ${terbilangText}
     </div>
 
     <div class="footer">
@@ -190,14 +216,18 @@ export function generateKwitansiHTML(
         <div>a.n. ${company?.name || ''}</div>
       </div>
       <div class="signature-area">
-        <div>Hormat Kami,</div>
-        <div style="height: 50px; display: flex; align-items: flex-end; justify-content: center;">
-          ${signatureImg}
+        <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;">Hormat Kami,</div>
+        <div style="height: 80px; display: flex; align-items: flex-end; justify-content: center;">
+          ${showSignature && company?.signature_url ? 
+            `<img src="${company.signature_url}" class="signature-img" />` : 
+            `<div style="width: 160px; border-bottom: 1px solid #000; margin-bottom: 4px; height: 30px;"></div>`
+          }
         </div>
         <div class="line"></div>
         <div class="name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="title">Direktur Utama</div>
         <div class="date">${formatDate(new Date().toISOString())}</div>
+        <div class="stamp">Materai Rp 10.000</div>
       </div>
     </div>
   </div>

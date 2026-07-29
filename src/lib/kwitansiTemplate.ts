@@ -97,6 +97,7 @@ export function generateKwitansiHTML(
   const ppn = invoice.ppn || 0;
   const grandTotal = invoice.total || totalSubtotal + ppn;
 
+  // 🔥🔥🔥 BANK - HANYA SEKALI 🔥🔥🔥
   const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
   const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
 
@@ -207,11 +208,11 @@ export function generateKwitansiHTML(
     </div>
 
     <div class="footer">
-     <div class="left">
-  <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
-  <div>${bankName} - ${bankAccountNo}</div>
-  <div>a.n. ${company?.name || ''}</div>
-</div>
+      <div class="left">
+        <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
+        <div>${bankName} - ${bankAccountNo}</div>
+        <div>a.n. ${company?.name || ''}</div>
+      </div>
       <div class="signature-area">
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;">Hormat Kami,</div>
         <div style="height: 80px; display: flex; align-items: flex-end; justify-content: center;">
@@ -224,7 +225,6 @@ export function generateKwitansiHTML(
         <div class="name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="title">Direktur Utama</div>
         <div class="date">${formatDate(new Date().toISOString())}</div>
-        <!-- 🔥 MATERAI TELAH DIHAPUS -->
       </div>
     </div>
   </div>

@@ -105,6 +105,9 @@ export default function Invoices() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
   
+  // ============ STATE ITEMS UNTUK DETAIL MODAL ============
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
+  
   const [formData, setFormData] = useState({
     customer_id: 0,
     customer_name: '',
@@ -203,7 +206,7 @@ export default function Invoices() {
         project_id: invoice.project_id,
         notes: invoice.notes || '',
         items: items && items.length > 0 ? items.map((item: any) => ({
-          description: item.description || '',
+          description: item.description || '',  // 🔥 PASTIKAN DESCRIPTION TERLOAD
           quantity: item.quantity || 1,
           unit_price: item.unit_price || 0,
           discount: item.discount || 0,
@@ -228,11 +231,17 @@ export default function Invoices() {
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
+  // ============ UPDATE ITEM META - FIX DESCRIPTION ============
   const updateItemMeta = (index: number, fieldKey: string, value: any) => {
     const newItems = [...formData.items];
     const item = newItems[index];
     if (!item.meta) item.meta = {};
     item.meta[fieldKey] = value;
+
+    // 🔥 JIKA FIELD ADALAH DESCRIPTION, SIMPAN KE item.description
+    if (fieldKey === 'description') {
+      item.description = value;
+    }
 
     if (selectedTemplate === 'general') {
       const qty = parseFloat(item.meta.quantity) || 1;
@@ -263,13 +272,21 @@ export default function Invoices() {
     setFormData({ ...formData, items: newItems });
   };
 
+  // ============ ADD ITEM - FIX DESCRIPTION ============
   const addItem = () => {
     const fields = getTemplateFields(selectedTemplate);
     const newMeta: any = {};
     fields.forEach(f => { newMeta[f.key] = ''; });
     setFormData({
       ...formData,
-      items: [...formData.items, { description: '', quantity: 1, unit_price: 0, discount: 0, amount: 0, meta: newMeta }]
+      items: [...formData.items, { 
+        description: '',  // 🔥 TAMBAHKAN DESCRIPTION
+        quantity: 1, 
+        unit_price: 0, 
+        discount: 0, 
+        amount: 0, 
+        meta: newMeta 
+      }]
     });
   };
 
@@ -335,22 +352,44 @@ export default function Invoices() {
     }
   };
 
-  // ============ SAVE INVOICE (CREATE OR UPDATE) ============
+  // ============ HANDLE VIEW DETAIL - FETCH ITEMS ============
+  const handleViewDetail = async (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    const { data } = await supabase
+      .from('invoice_items')
+      .select('*')
+      .eq('invoice_id', invoice.id);
+    setInvoiceItems(data || []);
+    setShowDetailModal(true);
+  };
+
+  // ============ SAVE INVOICE (CREATE OR UPDATE) - FIX DESCRIPTION ============
   const handleSaveInvoice = async () => {
     if (!formData.customer_id || formData.items.length === 0) {
       alert('Lengkapi customer dan minimal 1 item');
       return;
     }
+
+    // 🔥 VALIDASI DESKRIPSI
+    const emptyDesc = formData.items.some(item => !item.description || item.description.trim() === '');
+    if (emptyDesc) {
+      alert('Semua item harus memiliki deskripsi!');
+      return;
+    }
+
     if (!currentCompany?.id) return;
 
+    // 🔥 PASTIKAN DESCRIPTION TERBAWA
     const itemsToInsert = formData.items.map(item => ({
-      description: item.description || '',
+      description: item.description || '',  // 🔥 INI YANG PENTING
       quantity: item.quantity || 1,
       unit_price: item.unit_price || 0,
       discount: item.discount || 0,
       amount: item.amount || 0,
       meta: item.meta || {},
     }));
+
+    console.log('📝 Items to save:', itemsToInsert); // DEBUG
 
     if (isEditMode && editingInvoiceId) {
       // ========== UPDATE INVOICE ==========
@@ -383,11 +422,11 @@ export default function Invoices() {
         .delete()
         .eq('invoice_id', editingInvoiceId);
 
-      // Insert new items
+      // Insert new items with description
       for (const item of itemsToInsert) {
         await supabase.from('invoice_items').insert([{
           invoice_id: editingInvoiceId,
-          description: item.description,
+          description: item.description,  // 🔥 DESCRIPTION TERSIMPAN
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount: item.discount,
@@ -445,7 +484,7 @@ export default function Invoices() {
       for (const item of itemsToInsert) {
         await supabase.from('invoice_items').insert([{
           invoice_id: invoiceId,
-          description: item.description,
+          description: item.description,  // 🔥 DESCRIPTION TERSIMPAN
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount: item.discount,
@@ -540,7 +579,6 @@ export default function Invoices() {
     setShowPaymentModal(true);
   };
 
-  // ============ RECORD PAYMENT (FIX PPh 23 - UNIVERSAL) ============
   const handleRecordPayment = async () => {
     if (!selectedInvoice) return;
     
@@ -573,11 +611,9 @@ export default function Invoices() {
     const entries: any[] = [];
 
     if (includePph) {
-      // Potongan PPh 23 (2%)
       const pphAmount = Math.round(amount * 0.02);
       const bankAmount = amount - pphAmount;
 
-      // 🔥 Cari akun PPh 23 Dibayar Dimuka (prioritas tipe asset / tax)
       const { data: pphAccounts } = await supabase
         .from('coa')
         .select('id, code, name, type')
@@ -589,7 +625,6 @@ export default function Invoices() {
 
       let pphPrepaidAcc = pphAccounts && pphAccounts.length > 0 ? pphAccounts[0] : null;
 
-      // Jika tidak ditemukan, coba tanpa filter type
       if (!pphPrepaidAcc) {
         const { data: fallbackAccounts } = await supabase
           .from('coa')
@@ -601,7 +636,6 @@ export default function Invoices() {
         pphPrepaidAcc = fallbackAccounts && fallbackAccounts.length > 0 ? fallbackAccounts[0] : null;
       }
 
-      // Jika masih tidak ditemukan, coba cari dengan kode yang umum (1232, 1213, dll)
       if (!pphPrepaidAcc) {
         const { data: codeAccounts } = await supabase
           .from('coa')
@@ -613,13 +647,11 @@ export default function Invoices() {
         pphPrepaidAcc = codeAccounts && codeAccounts.length > 0 ? codeAccounts[0] : null;
       }
 
-      // Jika tetap tidak ditemukan, beri error
       if (!pphPrepaidAcc) {
         alert('Akun PPh 23 (PPh 23 Dibayar Dimuka) tidak ditemukan di COA. Pastikan ada akun dengan nama "PPh 23 Dibayar Dimuka" atau "PPh 23" dengan tipe aset/tax.');
         return;
       }
 
-      // Debit Bank (jumlah yang diterima setelah potongan)
       entries.push({
         account_id: bankAccount.id,
         account_code: bankAccount.code,
@@ -628,7 +660,6 @@ export default function Invoices() {
         credit: 0,
       });
 
-      // Debit PPh 23 Dibayar Dimuka (aset)
       entries.push({
         account_id: pphPrepaidAcc.id,
         account_code: pphPrepaidAcc.code,
@@ -637,7 +668,6 @@ export default function Invoices() {
         credit: 0,
       });
 
-      // Kredit Piutang (full amount)
       entries.push({
         account_id: receivableAcc.id,
         account_code: receivableAcc.code,
@@ -647,7 +677,6 @@ export default function Invoices() {
       });
 
     } else {
-      // Tanpa PPh 23
       entries.push({
         account_id: bankAccount.id,
         account_code: bankAccount.code,
@@ -664,7 +693,6 @@ export default function Invoices() {
       });
     }
 
-    // Buat jurnal
     const journalId = await createGeneralJournal(
       currentCompany!.id,
       paymentDate,
@@ -681,7 +709,6 @@ export default function Invoices() {
       return;
     }
 
-    // Update invoice
     const { error } = await supabase
       .from('invoices')
       .update({ 
@@ -696,7 +723,6 @@ export default function Invoices() {
       return;
     }
 
-    // Simpan ke invoice_payments
     const pphAmount = includePph ? Math.round(amount * 0.02) : 0;
     await supabase.from('invoice_payments').insert([{
       invoice_id: selectedInvoice.id,
@@ -805,7 +831,6 @@ export default function Invoices() {
     }
   };
 
-  // ============ EDIT INVOICE ============
   const handleEditInvoice = (invoice: Invoice) => {
     if (invoice.status !== 'draft') {
       alert('Hanya invoice status draft yang bisa diedit');
@@ -814,7 +839,6 @@ export default function Invoices() {
     loadInvoiceForEdit(invoice.id);
   };
 
-  // ========== AGING REPORT ==========
   const calculateAging = (invoice: Invoice) => {
     const today = new Date();
     const dueDate = new Date(invoice.due_date);
@@ -975,7 +999,7 @@ export default function Invoices() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(invoice); setShowDetailModal(true); }} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
+                        <button onClick={() => handleViewDetail(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
                         {invoice.status === 'draft' && (
                           <button onClick={() => handleEditInvoice(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Edit className="w-4 h-4" /></button>
                         )}
@@ -1233,7 +1257,6 @@ export default function Invoices() {
                   {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
               </div>
-              {/* 🔥 PPH 23 DI SINI */}
               <div>
                 <label className="flex items-center gap-2">
                   <input
@@ -1294,10 +1317,10 @@ export default function Invoices() {
       {/* Modal Detail */}
       {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
-            <div className="flex justify-between">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
+            <div className="flex justify-between items-center">
               <h2 className="font-display text-xl font-bold">Detail Invoice</h2>
-              <button onClick={() => setShowDetailModal(false)}>✕</button>
+              <button onClick={() => setShowDetailModal(false)} className="text-text-muted hover:text-text">✕</button>
             </div>
             <div className="space-y-2 mt-4">
               <p><strong>No:</strong> {selectedInvoice.invoice_number}</p>
@@ -1311,7 +1334,37 @@ export default function Invoices() {
               <p><strong>Template:</strong> {getTemplateLabel(selectedInvoice.template || 'general')}</p>
               {selectedInvoice.include_ppn && <p><strong>PPN:</strong> {formatCurrency(selectedInvoice.ppn_amount || 0)}</p>}
             </div>
-                        {/* 🔥 DOKUMEN TERKAIT */}
+
+            {/* 🔥 ITEMS LIST - SEKARANG MUNCUL */}
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-sm font-medium text-text mb-2">📋 Items</p>
+              {invoiceItems.length === 0 ? (
+                <p className="text-sm text-text-muted">Tidak ada item</p>
+              ) : (
+                <div className="space-y-2">
+                  {invoiceItems.map((item, idx) => (
+                    <div key={idx} className="bg-background p-2 rounded-lg text-sm">
+                      <p className="font-medium">{item.description || '-'}</p>
+                      <div className="flex justify-between text-text-muted text-xs">
+                        <span>Qty: {item.quantity || 1}</span>
+                        <span>Harga: {formatCurrency(item.unit_price || 0)}</span>
+                        {item.discount > 0 && <span>Diskon: {formatCurrency(item.discount)}</span>}
+                        <span className="font-semibold text-text">Total: {formatCurrency(item.amount || 0)}</span>
+                      </div>
+                      {item.meta && Object.keys(item.meta).length > 0 && (
+                        <div className="text-xs text-text-muted mt-1">
+                          {Object.entries(item.meta).map(([key, val]) => (
+                            val && <span key={key} className="mr-2">{key}: {String(val)}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 🔥 DOKUMEN TERKAIT */}
             {selectedInvoice && (
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>

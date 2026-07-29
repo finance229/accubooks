@@ -572,64 +572,68 @@ export default function Invoices() {
   };
 
   // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
-  const handleReverseVerify = async (invoice: Invoice) => {
-    if (user?.role !== 'super_admin') {
-      alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
-      return;
-    }
+ // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
+const handleReverseVerify = async (invoice: Invoice) => {
+  if (user?.role !== 'super_admin') {
+    alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
+    return;
+  }
 
-    if (!confirm(`Yakin ingin membatalkan verifikasi invoice ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
-      return;
-    }
+  if (!confirm(`Yakin ingin membatalkan verifikasi invoice ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
+    return;
+  }
 
-    try {
-      const { data: journals, error: jError } = await supabase
+  try {
+    // 1. Cari jurnal yang terkait dengan invoice ini
+    const { data: journals, error: jError } = await supabase
+      .from('journals')
+      .select('id')
+      .eq('reference_type', 'INVOICE')
+      .eq('reference_id', invoice.id);
+
+    if (jError) throw jError;
+
+    if (journals && journals.length > 0) {
+      const journalIds = journals.map(j => j.id);
+      
+      // 2. Hapus journal_lines
+      const { error: linesError } = await supabase
+        .from('journal_lines')
+        .delete()
+        .in('journal_id', journalIds);
+      
+      if (linesError) throw linesError;
+
+      // 3. Hapus journals
+      const { error: deleteError } = await supabase
         .from('journals')
-        .select('id')
-        .eq('reference_type', 'INVOICE')
-        .eq('reference_id', invoice.id);
+        .delete()
+        .in('id', journalIds);
+      
+      if (deleteError) throw deleteError;
 
-      if (jError) throw jError;
-
-      if (journals && journals.length > 0) {
-        const journalIds = journals.map(j => j.id);
-        
-        const { error: linesError } = await supabase
-          .from('journal_lines')
-          .delete()
-          .in('journal_id', journalIds);
-        
-        if (linesError) throw linesError;
-
-        const { error: deleteError } = await supabase
-          .from('journals')
-          .delete()
-          .in('id', journalIds);
-        
-        if (deleteError) throw deleteError;
-
-        console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk invoice ${invoice.id}`);
-      }
-
-      const { error: updateError } = await supabase
-        .from('invoices')
-        .update({ 
-          status: 'draft',
-          verified_by: null,
-          verified_at: null,
-        })
-        .eq('id', invoice.id);
-
-      if (updateError) throw updateError;
-
-      alert(`✅ Verifikasi invoice ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT.`);
-      fetchInvoices();
-
-    } catch (error) {
-      console.error('Error reverse verify:', error);
-      alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk invoice ${invoice.id}`);
     }
-  };
+
+    // 4. Update status invoice kembali ke draft (HANYA STATUS, tanpa verified_at/verified_by)
+    const { error: updateError } = await supabase
+      .from('invoices')
+      .update({ 
+        status: 'draft'
+        // 🔥 Hapus verified_by dan verified_at karena kolom tidak ada
+      })
+      .eq('id', invoice.id);
+
+    if (updateError) throw updateError;
+
+    alert(`✅ Verifikasi invoice ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT.`);
+    fetchInvoices();
+
+  } catch (error) {
+    console.error('Error reverse verify:', error);
+    alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
+  }
+};
 
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);

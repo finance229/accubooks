@@ -207,11 +207,11 @@ export function generateKwitansiHTML(
     </div>
 
     <div class="footer">
-      <div class="left">
-        <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
-        <div>${bankName} - ${bankAccountNo}</div>
-        <div>a.n. ${company?.name || ''}</div>
-      </div>
+     <div class="left">
+  <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
+  <div>${bankName} - ${bankAccountNo}</div>
+  <div>a.n. ${company?.name || ''}</div>
+</div>
       <div class="signature-area">
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;">Hormat Kami,</div>
         <div style="height: 80px; display: flex; align-items: flex-end; justify-content: center;">

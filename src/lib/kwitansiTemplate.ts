@@ -5,7 +5,9 @@ export function generateKwitansiHTML(
   company: any,
   customer: any,
   items: any[],
-  payment: any
+  payment: any,
+  bankAccount?: any,
+  showSignature?: boolean
 ) {
   const formatRupiah = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -57,13 +59,13 @@ export function generateKwitansiHTML(
   let totalSubtotal = 0;
 
   items.forEach((item) => {
-    const itemTotal = item.quantity * item.unit_price;
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
-        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee;">${item.description}</td>
-        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(item.unit_price)}</td>
+        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity || 1}</td>
+        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee;">${item.description || '-'}</td>
+        <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(item.unit_price || 0)}</td>
         <td style="padding: 8px 10px; font-size: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
       </tr>
     `;
@@ -72,8 +74,10 @@ export function generateKwitansiHTML(
   const ppn = invoice.ppn || 0;
   const grandTotal = invoice.total || totalSubtotal + ppn;
 
-  // Tanda tangan dari company
-  const signatureImg = company?.signature_url 
+  const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
+  const bankAccountNo = bankAccount?.code || company?.bank_account || '1010000777068';
+
+  const signatureImg = showSignature && company?.signature_url 
     ? `<img src="${company.signature_url}" style="max-width: 120px; max-height: 50px; margin-bottom: 4px;" />` 
     : '';
 
@@ -119,7 +123,6 @@ export function generateKwitansiHTML(
 </head>
 <body>
   <div class="kwitansi">
-    <!-- HEADER -->
     <div class="header">
       <div class="header-left">
         <div class="company-name">${company?.name || 'PT Artha Kondang Internasional'}</div>
@@ -132,7 +135,6 @@ export function generateKwitansiHTML(
       </div>
     </div>
 
-    <!-- INFO -->
     <div class="info-grid">
       <div class="left">
         <strong>Diterima dari</strong><br>
@@ -146,7 +148,6 @@ export function generateKwitansiHTML(
       </div>
     </div>
 
-    <!-- TABLE -->
     <div class="table-wrap">
       <table>
         <thead>
@@ -173,22 +174,19 @@ export function generateKwitansiHTML(
       </table>
     </div>
 
-    <!-- TOTAL -->
     <div class="total-row">
       <span class="label">Total Dibayar</span>
       <span class="amount">${formatRupiah(grandTotal)}</span>
     </div>
 
-    <!-- TERBILANG -->
     <div class="terbilang">
       <strong>Terbilang:</strong> ${terbilang(Math.round(grandTotal))} Rupiah
     </div>
 
-    <!-- FOOTER -->
     <div class="footer">
       <div class="left">
         <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
-        <div>${payment?.bank_name ? `Bank: ${payment.bank_name} - No. Rek ${payment.bank_account || ''}` : ''}</div>
+        <div>${bankName} - No. Rek ${bankAccountNo}</div>
         <div>a.n. ${company?.name || ''}</div>
       </div>
       <div class="signature-area">

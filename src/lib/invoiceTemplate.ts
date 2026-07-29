@@ -1,13 +1,20 @@
 // src/lib/invoiceTemplate.ts
 
-export function generateInvoiceHTML(invoice: any, company: any, customer: any, items: any[]) {
+export function generateInvoiceHTML(
+  invoice: any, 
+  company: any, 
+  customer: any, 
+  items: any[],
+  bankAccount?: any,
+  showSignature?: boolean
+) {
   const template = invoice.template || 'general';
   
   switch (template) {
-    case 'a': return generateTemplateA(invoice, company, customer, items);
-    case 'b': return generateTemplateB(invoice, company, customer, items);
-    case 'c': return generateTemplateC(invoice, company, customer, items);
-    default: return generateTemplateGeneral(invoice, company, customer, items);
+    case 'a': return generateTemplateA(invoice, company, customer, items, bankAccount, showSignature);
+    case 'b': return generateTemplateB(invoice, company, customer, items, bankAccount, showSignature);
+    case 'c': return generateTemplateC(invoice, company, customer, items, bankAccount, showSignature);
+    default: return generateTemplateGeneral(invoice, company, customer, items, bankAccount, showSignature);
   }
 }
 
@@ -61,7 +68,7 @@ function terbilang(angka: number) {
 }
 
 // ============================================================
-// BASE HTML GENERATOR (DENGAN TTD YANG BENAR)
+// BASE HTML GENERATOR
 // ============================================================
 function generateBaseHTML(
   invoice: any,
@@ -74,6 +81,8 @@ function generateBaseHTML(
   paidAmount: number,
   remainingAmount: number,
   template: string,
+  bankAccount?: any,
+  showSignature?: boolean,
   options?: { tableHeaders?: string[] }
 ) {
   const tableHeaders = options?.tableHeaders || ['DESCRIPTION', 'QTY', 'PRICE', 'DISCOUNT', 'TOTAL'];
@@ -89,6 +98,12 @@ function generateBaseHTML(
   }
 
   const ppnLabel = company?.id === 1 ? 'PPN 11%' : 'PPN 1.1%';
+  
+  // 🔥 Ambil data bank dari parameter
+  const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
+  const bankAccountNo = bankAccount?.code || company?.bank_account || '1010000777068';
+  const bankBranch = company?.bank_branch || 'Bank Mandiri KK Jkt Gandaria City';
+  const swiftCode = company?.swift_code || 'BMRIIDJXXX';
 
   return `<!DOCTYPE html>
 <html>
@@ -197,18 +212,17 @@ function generateBaseHTML(
       <div class="payment-section">
         <div class="payment-title">PAYMENT METHODS</div>
         <div class="payment-details">
-          Account No: ${company?.bank_account || '1010000777068'}<br>
+          Account No: ${bankAccountNo}<br>
           Account Name: ${company?.name || 'PT Artha Kondang Internasional'}<br>
-          Branch Name: ${company?.bank_branch || 'Bank Mandiri KK Jkt Gandaria City'}<br>
-          Swift Code: ${company?.swift_code || 'BMRIIDJXXX'}
+          Branch Name: ${bankBranch}<br>
+          Swift Code: ${swiftCode}
         </div>
       </div>
       
-      <!-- 🔥 TTD DIPERBAIKI 🔥 -->
       <div class="signature">
-        ${(invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') && company?.signature_url ? 
+        ${showSignature && (invoice.status === 'verified' || invoice.status === 'paid' || invoice.status === 'partial') && company?.signature_url ? 
           `<img src="${company.signature_url}" class="signature-img" />` : 
-          `<div class="signature-line"></div>`
+          showSignature ? `<div class="signature-line"></div>` : ''
         }
         <div class="signature-name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="signature-title">Direktur Utama</div>
@@ -229,7 +243,7 @@ function generateBaseHTML(
 // ============================================================
 // TEMPLATE GENERAL
 // ============================================================
-function generateTemplateGeneral(invoice: any, company: any, customer: any, items: any[]) {
+function generateTemplateGeneral(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -253,7 +267,7 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'general', {
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'general', bankAccount, showSignature, {
     tableHeaders: ['DESCRIPTION', 'QTY', 'PRICE', 'DISCOUNT', 'TOTAL']
   });
 }
@@ -261,7 +275,7 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
 // ============================================================
 // TEMPLATE A
 // ============================================================
-function generateTemplateA(invoice: any, company: any, customer: any, items: any[]) {
+function generateTemplateA(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -271,6 +285,7 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.tujuan || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.no_dokumen || '-'}</td>
@@ -289,15 +304,15 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'a', {
-    tableHeaders: ['Tanggal', 'Tujuan', 'No. Dokumen', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Jumlah']
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'a', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Tujuan', 'No. Dokumen', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Jumlah']
   });
 }
 
 // ============================================================
 // TEMPLATE B
 // ============================================================
-function generateTemplateB(invoice: any, company: any, customer: any, items: any[]) {
+function generateTemplateB(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -307,6 +322,7 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.origin || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.tujuan || '-'}</td>
@@ -324,15 +340,15 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'b', {
-    tableHeaders: ['Tanggal', 'Origin', 'Tujuan', 'Armada', 'No. Pol', 'Harga Ritase', 'Jumlah']
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'b', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Origin', 'Tujuan', 'Armada', 'No. Pol', 'Harga Ritase', 'Jumlah']
   });
 }
 
 // ============================================================
 // TEMPLATE C
 // ============================================================
-function generateTemplateC(invoice: any, company: any, customer: any, items: any[]) {
+function generateTemplateC(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
   let totalSubtotal = 0;
 
@@ -342,6 +358,7 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
     totalSubtotal += itemTotal;
     itemsHtml += `
       <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.keterangan || '-'}</td>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.unit || '-'}</td>
@@ -359,7 +376,7 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
   const paidAmount = invoice.paid_amount || 0;
   const remainingAmount = grandTotal - paidAmount;
 
-  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', {
-    tableHeaders: ['Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No Kontrak', 'Harga', 'Jumlah']
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No Kontrak', 'Harga', 'Jumlah']
   });
 }

@@ -24,7 +24,6 @@ export function generateKwitansiHTML(
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // 🔥🔥🔥 TERBILANG - HURUF SEMUA (SAMA DENGAN INVOICE) 🔥🔥🔥
   function terbilang(angka: number): string {
     if (angka === 0) return 'Nol';
     if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
@@ -61,7 +60,6 @@ export function generateKwitansiHTML(
       if (juta === 1) return 'Satu Juta ' + terbilang(sisa);
       return terbilang(juta) + ' Juta' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
-    // 🔥 MILYAR
     if (angka < 1000000000000) {
       const milyar = Math.floor(angka / 1000000000);
       const sisa = angka % 1000000000;
@@ -69,7 +67,6 @@ export function generateKwitansiHTML(
       if (milyar === 1) return 'Satu Milyar ' + terbilang(sisa);
       return terbilang(milyar) + ' Milyar' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
-    // 🔥 TRILIUN (untuk jaga-jaga)
     if (angka < 1000000000000000) {
       const triliun = Math.floor(angka / 1000000000000);
       const sisa = angka % 1000000000000;
@@ -77,13 +74,14 @@ export function generateKwitansiHTML(
       if (triliun === 1) return 'Satu Triliun ' + terbilang(sisa);
       return terbilang(triliun) + ' Triliun' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
     }
-    return angka.toString(); // fallback
+    return angka.toString();
   }
 
   let itemsHtml = '';
   let totalSubtotal = 0;
 
   items.forEach((item) => {
+    if (!item.description && !item.quantity && !item.unit_price) return;
     const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
     itemsHtml += `
@@ -102,7 +100,6 @@ export function generateKwitansiHTML(
   const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
   const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
 
-  // 🔥 TERBILANG - HURUF
   const terbilangText = terbilang(Math.round(grandTotal));
 
   return `<!DOCTYPE html>
@@ -142,7 +139,6 @@ export function generateKwitansiHTML(
     .signature-area .name { font-size: 13px; font-weight: 600; margin-top: 2px; }
     .signature-area .title { font-size: 11px; color: #555; }
     .signature-area .date { font-size: 11px; color: #555; margin-top: 2px; }
-    .signature-area .stamp { margin-top: 8px; font-size: 10px; color: #999; border: 1px solid #999; padding: 2px 12px; border-radius: 2px; display: inline-block; }
     @media print { body { background: white; padding: 0; } .kwitansi { box-shadow: none; margin: 0; width: 100%; } }
   </style>
 </head>
@@ -185,6 +181,8 @@ export function generateKwitansiHTML(
         </thead>
         <tbody>
           ${itemsHtml}
+        </tbody>
+        <tfoot>
           <tr>
             <td colspan="3" style="text-align:right; font-weight:600; border-top:1px solid #ccc;">Subtotal</td>
             <td style="text-align:right; font-weight:600; border-top:1px solid #ccc;">${formatRupiah(totalSubtotal)}</td>
@@ -195,7 +193,7 @@ export function generateKwitansiHTML(
             <td style="text-align:right; border-bottom:1px solid #ccc;">${formatRupiah(ppn)}</td>
           </tr>
           ` : ''}
-        </tbody>
+        </tfoot>
       </table>
     </div>
 
@@ -204,7 +202,6 @@ export function generateKwitansiHTML(
       <span class="amount">${formatRupiah(grandTotal)}</span>
     </div>
 
-    <!-- 🔥 TERBILANG - HURUF -->
     <div class="terbilang">
       <strong>Terbilang:</strong> ${terbilangText}
     </div>
@@ -212,7 +209,7 @@ export function generateKwitansiHTML(
     <div class="footer">
       <div class="left">
         <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
-        <div>${bankName} - No. Rek ${bankAccountNo}</div>
+        <div>${bankName} - ${bankAccountNo}</div>
         <div>a.n. ${company?.name || ''}</div>
       </div>
       <div class="signature-area">
@@ -227,7 +224,7 @@ export function generateKwitansiHTML(
         <div class="name">${company?.director || 'Adis Nugroho Santoso'}</div>
         <div class="title">Direktur Utama</div>
         <div class="date">${formatDate(new Date().toISOString())}</div>
-        <div class="stamp">Materai Rp 10.000</div>
+        <!-- 🔥 MATERAI TELAH DIHAPUS -->
       </div>
     </div>
   </div>

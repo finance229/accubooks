@@ -1,3 +1,94 @@
+// src/lib/invoiceTemplate.ts
+
+export function generateInvoiceHTML(
+  invoice: any, 
+  company: any, 
+  customer: any, 
+  items: any[],
+  bankAccount?: any,
+  showSignature?: boolean
+) {
+  const template = invoice.template || 'general';
+  
+  switch (template) {
+    case 'a': return generateTemplateA(invoice, company, customer, items, bankAccount, showSignature);
+    case 'b': return generateTemplateB(invoice, company, customer, items, bankAccount, showSignature);
+    case 'c': return generateTemplateC(invoice, company, customer, items, bankAccount, showSignature);
+    default: return generateTemplateGeneral(invoice, company, customer, items, bankAccount, showSignature);
+  }
+}
+
+// ============================================================
+// FORMAT HELPERS
+// ============================================================
+function formatRupiah(amount: number) {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(date: string) {
+  if (!date) return '';
+  const d = new Date(date);
+  const bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function terbilang(angka: number): string {
+  if (angka === 0) return 'Nol';
+  if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
+  
+  const satuan = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan'];
+  const belasan = ['Sepuluh', 'Sebelas', 'Dua Belas', 'Tiga Belas', 'Empat Belas', 'Lima Belas', 'Enam Belas', 'Tujuh Belas', 'Delapan Belas', 'Sembilan Belas'];
+  const puluhan = ['', '', 'Dua Puluh', 'Tiga Puluh', 'Empat Puluh', 'Lima Puluh', 'Enam Puluh', 'Tujuh Puluh', 'Delapan Puluh', 'Sembilan Puluh'];
+
+  if (angka < 10) return satuan[angka];
+  if (angka < 20) return belasan[angka - 10];
+  if (angka < 100) {
+    const puluh = Math.floor(angka / 10);
+    const sisa = angka % 10;
+    return puluhan[puluh] + (sisa > 0 ? ' ' + satuan[sisa] : '');
+  }
+  if (angka < 1000) {
+    const ratus = Math.floor(angka / 100);
+    const sisa = angka % 100;
+    if (ratus === 1 && sisa === 0) return 'Seratus';
+    if (ratus === 1) return 'Seratus ' + terbilang(sisa);
+    return satuan[ratus] + ' Ratus' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  if (angka < 1000000) {
+    const ribu = Math.floor(angka / 1000);
+    const sisa = angka % 1000;
+    if (ribu === 1 && sisa === 0) return 'Seribu';
+    if (ribu === 1) return 'Seribu ' + terbilang(sisa);
+    return terbilang(ribu) + ' Ribu' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  if (angka < 1000000000) {
+    const juta = Math.floor(angka / 1000000);
+    const sisa = angka % 1000000;
+    if (juta === 1 && sisa === 0) return 'Satu Juta';
+    if (juta === 1) return 'Satu Juta ' + terbilang(sisa);
+    return terbilang(juta) + ' Juta' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  if (angka < 1000000000000) {
+    const milyar = Math.floor(angka / 1000000000);
+    const sisa = angka % 1000000000;
+    if (milyar === 1 && sisa === 0) return 'Satu Milyar';
+    if (milyar === 1) return 'Satu Milyar ' + terbilang(sisa);
+    return terbilang(milyar) + ' Milyar' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  if (angka < 1000000000000000) {
+    const triliun = Math.floor(angka / 1000000000000);
+    const sisa = angka % 1000000000000;
+    if (triliun === 1 && sisa === 0) return 'Satu Triliun';
+    if (triliun === 1) return 'Satu Triliun ' + terbilang(sisa);
+    return terbilang(triliun) + ' Triliun' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  return angka.toString();
+}
+
 // ============================================================
 // BASE HTML GENERATOR
 // ============================================================
@@ -30,7 +121,6 @@ function generateBaseHTML(
 
   const ppnLabel = company?.id === 1 ? 'PPN 11%' : 'PPN 1.1%';
   
-  // 🔥🔥🔥 AMBIL DATA BANK 🔥🔥🔥
   const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
   const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
   const swiftCode = company?.swift_code || 'BMRIIDJXXX';
@@ -169,4 +259,145 @@ function generateBaseHTML(
   </div>
 </body>
 </html>`;
+}
+
+// ============================================================
+// TEMPLATE GENERAL
+// ============================================================
+function generateTemplateGeneral(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
+  let itemsHtml = '';
+  let totalSubtotal = 0;
+
+  items.forEach((item) => {
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0) - (item.discount || 0);
+    totalSubtotal += itemTotal;
+    itemsHtml += `
+      <tr>
+        <td style="padding: 8px 10px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || '-'}</td>
+        <td style="padding: 8px 10px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity || 0}</td>
+        <td style="padding: 8px 10px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(item.unit_price || 0)}</td>
+        <td style="padding: 8px 10px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(item.discount || 0)}</td>
+        <td style="padding: 8px 10px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
+      </tr>
+    `;
+  });
+
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
+
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'general', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'QTY', 'PRICE', 'DISCOUNT', 'TOTAL']
+  });
+}
+
+// ============================================================
+// TEMPLATE A
+// ============================================================
+function generateTemplateA(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
+  let itemsHtml = '';
+  let totalSubtotal = 0;
+
+  items.forEach((item) => {
+    const meta = item.meta || {};
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
+    totalSubtotal += itemTotal;
+    itemsHtml += `
+      <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.tujuan || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.no_dokumen || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.armada || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.no_pol || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga_ritase || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga_multi_drop || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
+      </tr>
+    `;
+  });
+
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
+
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'a', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Tujuan', 'No. Dokumen', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Jumlah']
+  });
+}
+
+// ============================================================
+// TEMPLATE B
+// ============================================================
+function generateTemplateB(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
+  let itemsHtml = '';
+  let totalSubtotal = 0;
+
+  items.forEach((item) => {
+    const meta = item.meta || {};
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
+    totalSubtotal += itemTotal;
+    itemsHtml += `
+      <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.origin || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.tujuan || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.armada || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.no_pol || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga_ritase || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
+      </tr>
+    `;
+  });
+
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
+
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'b', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Origin', 'Tujuan', 'Armada', 'No. Pol', 'Harga Ritase', 'Jumlah']
+  });
+}
+
+// ============================================================
+// TEMPLATE C
+// ============================================================
+function generateTemplateC(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
+  let itemsHtml = '';
+  let totalSubtotal = 0;
+
+  items.forEach((item) => {
+    const meta = item.meta || {};
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
+    totalSubtotal += itemTotal;
+    itemsHtml += `
+      <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${item.description || meta.deskripsi || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.keterangan || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.unit || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_pol || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_kontrak || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
+      </tr>
+    `;
+  });
+
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
+
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', bankAccount, showSignature, {
+    tableHeaders: ['DESCRIPTION', 'Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No Kontrak', 'Harga', 'Jumlah']
+  });
 }

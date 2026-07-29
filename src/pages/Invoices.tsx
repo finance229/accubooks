@@ -74,6 +74,7 @@ type BankAccount = {
   id: number;
   code: string;
   name: string;
+  account_number?: string;
 };
 
 export default function Invoices() {
@@ -373,7 +374,6 @@ export default function Invoices() {
       return;
     }
 
-    // 🔥 VALIDASI DESKRIPSI - CEK description ATAU meta.description
     const emptyDesc = formData.items.some(item => {
       const desc = item.description || item.meta?.description || '';
       return desc.trim() === '';
@@ -385,7 +385,6 @@ export default function Invoices() {
 
     if (!currentCompany?.id) return;
 
-    // 🔥 AMBIL DESKRIPSI DARI item.description ATAU meta.description
     const itemsToInsert = formData.items.map(item => ({
       description: item.description || item.meta?.description || '',
       quantity: item.quantity || 1,
@@ -845,7 +844,7 @@ export default function Invoices() {
       if (downloadInvoice.bank_account_id) {
         const { data: bankData } = await supabase
           .from('coa')
-          .select('id, code, name')
+          .select('id, code, name, account_number')
           .eq('id', downloadInvoice.bank_account_id)
           .single();
         bankAccount = bankData;
@@ -855,7 +854,8 @@ export default function Invoices() {
         bankAccount = {
           id: 0,
           code: '1102',
-          name: company?.bank_name || 'Bank Default'
+          name: company?.bank_name || 'Bank Default',
+          account_number: company?.bank_account || '1010000777068'
         };
       }
 
@@ -1244,7 +1244,7 @@ export default function Invoices() {
                   <option value="">-- Pilih Rekening --</option>
                   {bankAccounts.map(bank => (
                     <option key={bank.id} value={bank.id}>
-                      {bank.code} - {bank.name}
+                      {bank.code} - {bank.name} {bank.account_number ? `(${bank.account_number})` : ''}
                     </option>
                   ))}
                 </select>
@@ -1378,7 +1378,7 @@ export default function Invoices() {
               <div><label className="block text-sm font-medium mb-1">Akun Bank / Kas</label>
                 <select value={selectedBankId} onChange={e => setSelectedBankId(parseInt(e.target.value))} className="w-full px-4 py-2 border rounded-lg">
                   <option value={0}>-- Pilih Akun --</option>
-                  {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
+                  {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name} {acc.account_number ? `(${acc.account_number})` : ''}</option>))}
                 </select>
                 {selectedInvoice.bank_account_id && (
                   <p className="text-xs text-text-muted mt-1">Default dari invoice: {bankAccounts.find(b => b.id === selectedInvoice.bank_account_id)?.name || '-'}</p>

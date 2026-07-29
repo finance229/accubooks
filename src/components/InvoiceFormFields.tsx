@@ -32,13 +32,13 @@ export const TEMPLATE_FIELDS: Record<string, TemplateField[]> = {
     { key: 'harga_ritase', label: 'Harga Ritase', type: 'number', placeholder: '0' },
   ],
   c: [
-  { key: 'tanggal', label: 'Tanggal', type: 'date' },
-  { key: 'keterangan', label: 'Keterangan', type: 'text', placeholder: 'Keterangan' },
-  { key: 'unit', label: 'Unit', type: 'text', placeholder: 'Unit' },
-  { key: 'no_pol', label: 'No. Pol', type: 'text', placeholder: 'No. Pol' },
-  { key: 'no_kontrak', label: 'No Kontrak', type: 'text', placeholder: 'No Kontrak' },
-  { key: 'harga', label: 'Harga', type: 'number', placeholder: '0' },
-],
+    { key: 'tanggal', label: 'Tanggal', type: 'date' },
+    { key: 'keterangan', label: 'Keterangan', type: 'text', placeholder: 'Keterangan' },
+    { key: 'unit', label: 'Unit', type: 'text', placeholder: 'Unit' },
+    { key: 'no_pol', label: 'No. Pol', type: 'text', placeholder: 'No. Pol' },
+    { key: 'no_kontrak', label: 'No Kontrak', type: 'text', placeholder: 'No Kontrak' },
+    { key: 'harga', label: 'Harga', type: 'number', placeholder: '0' },
+  ],
 };
 
 export function getTemplateFields(template: string): TemplateField[] {

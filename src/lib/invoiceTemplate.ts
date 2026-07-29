@@ -99,11 +99,14 @@ function generateBaseHTML(
 
   const ppnLabel = company?.id === 1 ? 'PPN 11%' : 'PPN 1.1%';
   
-  // 🔥 Ambil data bank dari parameter
+  // 🔥 Account No - pakai account_number
+  const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
   const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
-  const bankAccountNo = bankAccount?.code || company?.bank_account || '1010000777068';
   const bankBranch = company?.bank_branch || 'Bank Mandiri KK Jkt Gandaria City';
   const swiftCode = company?.swift_code || 'BMRIIDJXXX';
+
+  // 🔥 Terbilang
+  const terbilangText = terbilang(Math.round(grandTotal));
 
   return `<!DOCTYPE html>
 <html>
@@ -206,7 +209,7 @@ function generateBaseHTML(
       </table>
       
       <div style="margin-top: 10px; font-size: 11px; font-weight: 500;">
-        Terbilang: <span style="font-weight: normal;">${terbilang(Math.round(grandTotal))} Rupiah</span>
+        Terbilang: <span style="font-weight: normal;">${terbilangText}</span>
       </div>
       
       <div class="payment-section">

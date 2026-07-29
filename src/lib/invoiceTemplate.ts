@@ -36,12 +36,15 @@ function formatDate(date: string) {
   return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function terbilang(angka: number) {
+// 🔥🔥🔥 TERBILANG - HURUF SEMUA (SUPPORT SAMPAI MILYAR) 🔥🔥🔥
+function terbilang(angka: number): string {
+  if (angka === 0) return 'Nol';
+  if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
+  
   const satuan = ['', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan'];
   const belasan = ['Sepuluh', 'Sebelas', 'Dua Belas', 'Tiga Belas', 'Empat Belas', 'Lima Belas', 'Enam Belas', 'Tujuh Belas', 'Delapan Belas', 'Sembilan Belas'];
   const puluhan = ['', '', 'Dua Puluh', 'Tiga Puluh', 'Empat Puluh', 'Lima Puluh', 'Enam Puluh', 'Tujuh Puluh', 'Delapan Puluh', 'Sembilan Puluh'];
 
-  if (angka === 0) return 'Nol';
   if (angka < 10) return satuan[angka];
   if (angka < 20) return belasan[angka - 10];
   if (angka < 100) {
@@ -52,19 +55,41 @@ function terbilang(angka: number) {
   if (angka < 1000) {
     const ratus = Math.floor(angka / 100);
     const sisa = angka % 100;
+    if (ratus === 1 && sisa === 0) return 'Seratus';
+    if (ratus === 1) return 'Seratus ' + terbilang(sisa);
     return satuan[ratus] + ' Ratus' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
   }
   if (angka < 1000000) {
     const ribu = Math.floor(angka / 1000);
     const sisa = angka % 1000;
+    if (ribu === 1 && sisa === 0) return 'Seribu';
+    if (ribu === 1) return 'Seribu ' + terbilang(sisa);
     return terbilang(ribu) + ' Ribu' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
   }
   if (angka < 1000000000) {
     const juta = Math.floor(angka / 1000000);
     const sisa = angka % 1000000;
+    if (juta === 1 && sisa === 0) return 'Satu Juta';
+    if (juta === 1) return 'Satu Juta ' + terbilang(sisa);
     return terbilang(juta) + ' Juta' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
   }
-  return angka.toString();
+  // 🔥 MILYAR
+  if (angka < 1000000000000) {
+    const milyar = Math.floor(angka / 1000000000);
+    const sisa = angka % 1000000000;
+    if (milyar === 1 && sisa === 0) return 'Satu Milyar';
+    if (milyar === 1) return 'Satu Milyar ' + terbilang(sisa);
+    return terbilang(milyar) + ' Milyar' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  // 🔥 TRILIUN (untuk jaga-jaga)
+  if (angka < 1000000000000000) {
+    const triliun = Math.floor(angka / 1000000000000);
+    const sisa = angka % 1000000000000;
+    if (triliun === 1 && sisa === 0) return 'Satu Triliun';
+    if (triliun === 1) return 'Satu Triliun ' + terbilang(sisa);
+    return terbilang(triliun) + ' Triliun' + (sisa > 0 ? ' ' + terbilang(sisa) : '');
+  }
+  return angka.toString(); // fallback untuk angka sangat besar
 }
 
 // ============================================================
@@ -101,11 +126,9 @@ function generateBaseHTML(
   
   // 🔥 Account No - pakai account_number
   const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
-  const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
-  const bankBranch = company?.bank_branch || 'Bank Mandiri KK Jkt Gandaria City';
   const swiftCode = company?.swift_code || 'BMRIIDJXXX';
 
-  // 🔥 Terbilang
+  // 🔥🔥🔥 TERBILANG - HURUF SEMUA 🔥🔥🔥
   const terbilangText = terbilang(Math.round(grandTotal));
 
   return `<!DOCTYPE html>
@@ -208,8 +231,9 @@ function generateBaseHTML(
         ` : ''}
       </table>
       
+      <!-- 🔥 TERBILANG - HURUF SEMUA -->
       <div style="margin-top: 10px; font-size: 11px; font-weight: 500;">
-        Terbilang: <span style="font-weight: normal;">${terbilangText}</span>
+        Terbilang: <span style="font-weight: normal; text-transform: capitalize;">${terbilangText}</span>
       </div>
       
       <div class="payment-section">
@@ -217,8 +241,8 @@ function generateBaseHTML(
         <div class="payment-details">
           Account No: ${bankAccountNo}<br>
           Account Name: ${company?.name || 'PT Artha Kondang Internasional'}<br>
-          Branch Name: ${bankBranch}<br>
           Swift Code: ${swiftCode}
+          <!-- 🔥 Branch Name DIHAPUS -->
         </div>
       </div>
       

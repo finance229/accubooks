@@ -79,6 +79,7 @@ export default function PurchaseInvoices() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [coaList, setCoaList] = useState<Coa[]>([]);
   const [bankAccounts, setBankAccounts] = useState<Coa[]>([]);
+  const [expenseAccounts, setExpenseAccounts] = useState<Coa[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -136,9 +137,15 @@ export default function PurchaseInvoices() {
   });
   const [budgetInfo, setBudgetInfo] = useState<{ sufficient: boolean; message: string } | null>(null);
   
+  // ============ STATE PEMBAYARAN ============
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [creditAccountId, setCreditAccountId] = useState(0);
+  
+  // 🔥 STATE UNTUK BIAYA ADMIN
+  const [biayaAdmin, setBiayaAdmin] = useState(0);
+  const [adminAccountId, setAdminAccountId] = useState(0);
+  const [showAdminFee, setShowAdminFee] = useState(false);
 
   useEffect(() => {
     if (currentCompany?.id) {
@@ -231,6 +238,7 @@ export default function PurchaseInvoices() {
       fetchProjects();
       fetchCoa();
       fetchBankAccounts();
+      fetchExpenseAccounts();
     }
   }, [currentCompany, selectedMonth]);
 
@@ -298,6 +306,21 @@ export default function PurchaseInvoices() {
       .order('code');
     
     setBankAccounts(data || []);
+  };
+
+  // 🔥 FETCH AKUN BIAYA ADMIN (EXPENSE)
+  const fetchExpenseAccounts = async () => {
+    if (!currentCompany?.id) return;
+    
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', currentCompany.id)
+      .eq('is_active', true)
+      .eq('type', 'expense')
+      .order('code');
+    
+    setExpenseAccounts(data || []);
   };
 
   const filteredVendors = vendors.filter(v =>
@@ -757,9 +780,26 @@ export default function PurchaseInvoices() {
     setPaymentAmount(remaining.toString());
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setCreditAccountId(0);
+    
+    // 🔥 RESET BIAYA ADMIN
+    setBiayaAdmin(0);
+    setAdminAccountId(0);
+    setShowAdminFee(false);
+    
+    // 🔥 SET DEFAULT AKUN BIAYA ADMIN (cari akun "Beban Administrasi Bank" atau sejenisnya)
+    const defaultAdminAcc = expenseAccounts.find(acc => 
+      acc.name.toLowerCase().includes('administrasi') || 
+      acc.name.toLowerCase().includes('admin') ||
+      acc.name.toLowerCase().includes('bank')
+    );
+    if (defaultAdminAcc) {
+      setAdminAccountId(defaultAdminAcc.id);
+    }
+    
     setShowPaymentModal(true);
   };
 
+  // ============ HANDLE PAYMENT DENGAN BIAYA ADMIN ============
   const handlePayment = async () => {
     if (!selectedInvoice) return;
     const amount = parseInt(paymentAmount);
@@ -770,6 +810,18 @@ export default function PurchaseInvoices() {
     if (!creditAccountId) {
       alert('Pilih akun bank/kas');
       return;
+    }
+
+    // 🔥 CEK BIAYA ADMIN
+    let adminFee = 0;
+    let adminAccId = 0;
+    if (showAdminFee) {
+      adminFee = biayaAdmin || 0;
+      adminAccId = adminAccountId;
+      if (adminFee > 0 && !adminAccId) {
+        alert('Pilih akun untuk biaya admin');
+        return;
+      }
     }
 
     const currentPaid = selectedInvoice.paid_amount || 0;
@@ -792,19 +844,38 @@ export default function PurchaseInvoices() {
         debit: amount,
         credit: 0,
       },
-      {
-        account_id: bankAccount.id,
-        account_code: bankAccount.code,
-        account_name: bankAccount.name,
-        debit: 0,
-        credit: amount,
-      },
     ];
+
+    // 🔥 TAMBAHKAN BIAYA ADMIN JIKA ADA
+    if (adminFee > 0 && adminAccId) {
+      const adminAcc = coaList.find(c => c.id === adminAccId);
+      if (!adminAcc) {
+        alert('Akun biaya admin tidak ditemukan');
+        return;
+      }
+      entries.push({
+        account_id: adminAcc.id,
+        account_code: adminAcc.code,
+        account_name: adminAcc.name,
+        debit: adminFee,
+        credit: 0,
+      });
+    }
+
+    // 🔥 TOTAL YANG DIKREDIT DARI BANK = amount + adminFee
+    const totalBank = amount + adminFee;
+    entries.push({
+      account_id: bankAccount.id,
+      account_code: bankAccount.code,
+      account_name: bankAccount.name,
+      debit: 0,
+      credit: totalBank,
+    });
 
     const journalId = await createGeneralJournal(
       currentCompany!.id,
       paymentDate,
-      `Pembayaran ke ${selectedInvoice.vendor_name} untuk invoice ${selectedInvoice.invoice_number}`,
+      `Pembayaran ke ${selectedInvoice.vendor_name} untuk invoice ${selectedInvoice.invoice_number}${adminFee > 0 ? ` (Biaya Admin: ${formatCurrency(adminFee)})` : ''}`,
       selectedInvoice.invoice_number,
       'AP_PAYMENT',
       selectedInvoice.id,
@@ -837,9 +908,16 @@ export default function PurchaseInvoices() {
         payment_date: paymentDate,
         amount: amount,
         bank_account_id: creditAccountId,
+        admin_fee: adminFee,
+        admin_account_id: adminAccId || null,
         created_by: user?.email,
       }]);
-      alert(`Pembayaran ${formatCurrency(amount)} berhasil dicatat`);
+      
+      let successMsg = `Pembayaran ${formatCurrency(amount)} berhasil dicatat`;
+      if (adminFee > 0) {
+        successMsg += `\nBiaya Admin: ${formatCurrency(adminFee)} (Total ditarik dari bank: ${formatCurrency(totalBank)})`;
+      }
+      alert(successMsg);
       setShowPaymentModal(false);
       fetchInvoices();
     }
@@ -1190,7 +1268,7 @@ export default function PurchaseInvoices() {
 
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl p-6 w-full max-w-md">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md max-h-[80vh] overflow-auto">
             <h2 className="font-display text-xl font-bold mb-4">Pembayaran AP</h2>
             <div className="space-y-4">
               <div><p className="text-sm text-text-muted">No. AP</p><p className="font-semibold">{selectedInvoice.invoice_number}</p></div>
@@ -1204,6 +1282,62 @@ export default function PurchaseInvoices() {
                   <option value={0}>-- Pilih Akun --</option>
                   {bankAccounts.map(acc => (<option key={acc.id} value={acc.id}>{acc.code} - {acc.name}</option>))}
                 </select>
+              </div>
+
+              {/* 🔥 BIAYA ADMIN */}
+              <div className="border-t border-border pt-4 mt-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <input
+                    type="checkbox"
+                    id="showAdminFee"
+                    checked={showAdminFee}
+                    onChange={(e) => {
+                      setShowAdminFee(e.target.checked);
+                      if (!e.target.checked) {
+                        setBiayaAdmin(0);
+                      }
+                    }}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="showAdminFee" className="text-sm font-medium">
+                    Ada Biaya Admin
+                  </label>
+                </div>
+
+                {showAdminFee && (
+                  <div className="space-y-3 pl-6 border-l-2 border-accent/30">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Jumlah Biaya Admin</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={biayaAdmin || ''}
+                        onChange={(e) => setBiayaAdmin(parseInt(e.target.value) || 0)}
+                        className="w-full px-4 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Akun Biaya Admin</label>
+                      <select
+                        value={adminAccountId}
+                        onChange={(e) => setAdminAccountId(parseInt(e.target.value))}
+                        className="w-full px-4 py-2 border rounded-lg"
+                      >
+                        <option value={0}>-- Pilih Akun --</option>
+                        {expenseAccounts.map(acc => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.code} - {acc.name}
+                          </option>
+                        ))}
+                      </select>
+                      {biayaAdmin > 0 && adminAccountId > 0 && (
+                        <p className="text-xs text-text-muted mt-1">
+                          Total ditarik dari bank: {formatCurrency(parseInt(paymentAmount) + biayaAdmin)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">

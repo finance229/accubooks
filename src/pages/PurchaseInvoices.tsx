@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, FileText } from 'lucide-react';
+import { Plus, Search, Eye, Send, DollarSign, Clock, CheckCircle, Download, X, Trash2, User, FolderOpen, Edit, FileText, Undo2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -93,7 +93,6 @@ export default function PurchaseInvoices() {
   const [includePpn, setIncludePpn] = useState(true);
   const [includePph, setIncludePph] = useState(false);
   
-  // 🆕 STATE UNTUK COMPANY CODE DAN PREVIEW VOUCHER
   const [companyCode, setCompanyCode] = useState<string>('');
   const [voucherPreview, setVoucherPreview] = useState<string>('');
   const [isGeneratingPreview, setIsGeneratingPreview] = useState<boolean>(false);
@@ -137,7 +136,7 @@ export default function PurchaseInvoices() {
   const [creditAccountId, setCreditAccountId] = useState(0);
 
   // ============================================
-  // 🆕 FETCH COMPANY CODE
+  // FETCH COMPANY CODE
   // ============================================
   useEffect(() => {
     if (currentCompany?.id) {
@@ -145,94 +144,82 @@ export default function PurchaseInvoices() {
     }
   }, [currentCompany]);
 
- const fetchCompanyCode = async () => {
-  if (!currentCompany?.id) {
-    console.log('⚠️ No company ID');
-    return;
-  }
-  
-  console.log('🔍 Fetching company code for ID:', currentCompany.id);
-  
-  try {
-    const { data, error } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', currentCompany.id)
-      .single();
-    
-    if (error) {
-      console.error('❌ Error fetching company:', error);
+  const fetchCompanyCode = async () => {
+    if (!currentCompany?.id) {
+      console.log('⚠️ No company ID');
       return;
     }
     
-    console.log('✅ Company data:', data);
-    
-    // Coba berbagai kemungkinan nama kolom
-    const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
-    console.log('✅ Company Code:', code);
-    setCompanyCode(code);
-  } catch (err) {
-    console.error('❌ Fetch error:', err);
-  }
-};
+    try {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', currentCompany.id)
+        .single();
+      
+      if (error) {
+        console.error('❌ Error fetching company:', error);
+        return;
+      }
+      
+      const code = data.code || data.company_code || data.kode || data.name?.substring(0, 4).toUpperCase() || 'COMP';
+      setCompanyCode(code);
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+    }
+  };
 
   // ============================================
-  // 🆕 GENERATE PREVIEW VOUCHER OTOMATIS
+  // GENERATE PREVIEW VOUCHER
   // ============================================
- const generateVoucherPreview = async () => {
-  console.log('🔍 Generating preview - companyCode:', companyCode);
-  
-  if (!currentCompany?.id || !companyCode) {
-    setVoucherPreview('');
-    return;
-  }
-
-  setIsGeneratingPreview(true);
-
-  try {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    
-    const projectId = verifyData.projectId || formData.project_id;
-    const project = projects.find(p => p.id === projectId);
-    const projectCode = project?.code || '';
-
-    let basePattern = `${companyCode}/${year}/${month}`;
-    if (projectCode) {
-      basePattern += `/${projectCode}`;
+  const generateVoucherPreview = async () => {
+    if (!currentCompany?.id || !companyCode) {
+      setVoucherPreview('');
+      return;
     }
 
-    console.log('🔍 Base pattern:', basePattern);
+    setIsGeneratingPreview(true);
 
-    const { data: existingVouchers } = await supabase
-      .from('vendor_invoices')
-      .select('voucher_no')
-      .ilike('voucher_no', `${basePattern}/%`)
-      .order('voucher_no', { ascending: false })
-      .limit(1);
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      
+      const projectId = verifyData.projectId || formData.project_id;
+      const project = projects.find(p => p.id === projectId);
+      const projectCode = project?.code || '';
 
-    let lastNumber = 0;
-    if (existingVouchers && existingVouchers.length > 0) {
-      const parts = existingVouchers[0].voucher_no.split('/');
-      const lastPart = parts[parts.length - 1];
-      lastNumber = parseInt(lastPart) || 0;
+      let basePattern = `${companyCode}/${year}/${month}`;
+      if (projectCode) {
+        basePattern += `/${projectCode}`;
+      }
+
+      const { data: existingVouchers } = await supabase
+        .from('vendor_invoices')
+        .select('voucher_no')
+        .ilike('voucher_no', `${basePattern}/%`)
+        .order('voucher_no', { ascending: false })
+        .limit(1);
+
+      let lastNumber = 0;
+      if (existingVouchers && existingVouchers.length > 0) {
+        const parts = existingVouchers[0].voucher_no.split('/');
+        const lastPart = parts[parts.length - 1];
+        lastNumber = parseInt(lastPart) || 0;
+      }
+
+      const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+      const preview = `${basePattern}/${nextNumber}`;
+      
+      setVoucherPreview(preview);
+    } catch (error) {
+      console.error('❌ Error generating preview:', error);
+      setVoucherPreview('(gagal generate)');
+    } finally {
+      setIsGeneratingPreview(false);
     }
+  };
 
-    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
-    const preview = `${basePattern}/${nextNumber}`;
-    
-    console.log('✅ Preview voucher:', preview);
-    setVoucherPreview(preview);
-  } catch (error) {
-    console.error('❌ Error generating preview:', error);
-    setVoucherPreview('(gagal generate)');
-  } finally {
-    setIsGeneratingPreview(false);
-  }
-};
-
-  // 🆕 Auto-generate preview saat project atau company berubah
   useEffect(() => {
     if (companyCode) {
       generateVoucherPreview();
@@ -284,35 +271,31 @@ export default function PurchaseInvoices() {
   };
 
   const fetchCoa = async () => {
-  if (!currentCompany?.id) return;
-  
-  // 🔥 AMBIL SEMUA AKUN (TANPA FILTER YANG TERLALU STRICT)
-  const { data } = await supabase
-    .from('coa')
-    .select('id, code, name, type')
-    .eq('company_id', currentCompany.id)
-    .eq('is_active', true)
-    .order('code');
-  
-  console.log('📊 COA loaded:', data?.length);
-  setCoaList(data || []);
-};
+    if (!currentCompany?.id) return;
+    
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name, type')
+      .eq('company_id', currentCompany.id)
+      .eq('is_active', true)
+      .order('code');
+    
+    setCoaList(data || []);
+  };
 
   const fetchBankAccounts = async () => {
-  if (!currentCompany?.id) return;
-  
-  // 🔥 AMBIL SEMUA AKUN TIPE ASET (TERMASUK BANK & KAS)
-  const { data } = await supabase
-    .from('coa')
-    .select('id, code, name')
-    .eq('company_id', currentCompany.id)
-    .eq('is_active', true)
-    .eq('type', 'asset')
-    .order('code');
-  
-  console.log('🏦 Bank Accounts (all assets):', data?.length);
-  setBankAccounts(data || []);
-};
+    if (!currentCompany?.id) return;
+    
+    const { data } = await supabase
+      .from('coa')
+      .select('id, code, name')
+      .eq('company_id', currentCompany.id)
+      .eq('is_active', true)
+      .eq('type', 'asset')
+      .order('code');
+    
+    setBankAccounts(data || []);
+  };
 
   const filteredVendors = vendors.filter(v =>
     v.name.toLowerCase().includes(vendorSearch.toLowerCase())
@@ -504,7 +487,7 @@ export default function PurchaseInvoices() {
   };
 
   // ============================================
-  // 🆕 HANDLE VERIFY DENGAN SKEMA VOUCHER BARU
+  // HANDLE VERIFY
   // ============================================
   const handleVerify = async () => {
     if (!selectedInvoice) return;
@@ -521,35 +504,29 @@ export default function PurchaseInvoices() {
       return;
     }
 
-    // Di handleVerify, kalau companyCode kosong, ambil dari database langsung
-let finalCompanyCode = companyCode;
-if (!finalCompanyCode) {
-  const { data } = await supabase
-    .from('companies')
-    .select('*')
-    .eq('id', currentCompany!.id)
-    .single();
-  finalCompanyCode = data?.code || data?.name?.substring(0, 4).toUpperCase() || 'COMP';
-}
+    let finalCompanyCode = companyCode;
+    if (!finalCompanyCode) {
+      const { data } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', currentCompany!.id)
+        .single();
+      finalCompanyCode = data?.code || data?.name?.substring(0, 4).toUpperCase() || 'COMP';
+    }
 
-    // 🔥 GENERATE VOUCHER PAKE GLOBAL SEQUENCE
-const now = new Date();
-const year = now.getFullYear();
-const month = String(now.getMonth() + 1).padStart(2, '0');
-const project = projects.find(p => p.id === verifyData.projectId);
-const projectCode = project?.code || '';
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const project = projects.find(p => p.id === verifyData.projectId);
+    const projectCode = project?.code || '';
 
-const basePattern = `${companyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
+    const basePattern = `${finalCompanyCode}/${year}/${month}` + (projectCode ? `/${projectCode}` : '');
 
-// 🔥 PAKE generateVoucherNumber (GLOBAL SEQUENCE)
-const voucherNo = await generateVoucherNumber(
-  currentCompany!.id,
-  basePattern
-);
+    const voucherNo = await generateVoucherNumber(
+      currentCompany!.id,
+      basePattern
+    );
 
-console.log('📝 Voucher Generated:', voucherNo);
-
-    // 🔴 LANJUTKAN VERIFIKASI
     const ppnInAcc = await getDefaultAccount(currentCompany!.id, 'ppn_in');
     const pph23Acc = await getDefaultAccount(currentCompany!.id, 'pph23');
     const payableAcc = await getDefaultAccount(currentCompany!.id, 'payable');
@@ -625,7 +602,7 @@ console.log('📝 Voucher Generated:', voucherNo);
         status: 'verified',
         project_id: verifyData.projectId,
         debit_account_id: verifyData.debitAccountId,
-        voucher_no: voucherNo, // 🆕 VOUCHER SESUAI SKEMA
+        voucher_no: voucherNo,
         verified_by: user?.email,
         verified_at: new Date().toISOString(),
       })
@@ -637,6 +614,90 @@ console.log('📝 Voucher Generated:', voucherNo);
       alert(`✅ AP berhasil diverifikasi!\nVoucher: ${voucherNo}`);
       setShowVerifyModal(false);
       fetchInvoices();
+    }
+  };
+
+  // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
+  const handleReverseVerify = async (invoice: PurchaseInvoice) => {
+    if (user?.role !== 'super_admin') {
+      alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
+      return;
+    }
+
+    if (!confirm(`Yakin ingin membatalkan verifikasi AP ${invoice.invoice_number}?\n\nJurnal yang terkait akan dihapus.`)) {
+      return;
+    }
+
+    try {
+      const { data: journals, error: jError } = await supabase
+        .from('journals')
+        .select('id')
+        .eq('reference_type', 'AP')
+        .eq('reference_id', invoice.id);
+
+      if (jError) throw jError;
+
+      if (journals && journals.length > 0) {
+        const journalIds = journals.map(j => j.id);
+        
+        const { error: linesError } = await supabase
+          .from('journal_lines')
+          .delete()
+          .in('journal_id', journalIds);
+        
+        if (linesError) throw linesError;
+
+        const { error: deleteError } = await supabase
+          .from('journals')
+          .delete()
+          .in('id', journalIds);
+        
+        if (deleteError) throw deleteError;
+
+        console.log(`🗑️ ${journalIds.length} jurnal dihapus untuk AP ${invoice.id}`);
+      }
+
+      const { error: updateError } = await supabase
+        .from('vendor_invoices')
+        .update({ 
+          status: 'submitted',
+          project_id: null,
+          debit_account_id: null,
+          verified_by: null,
+          verified_at: null,
+        })
+        .eq('id', invoice.id);
+
+      if (updateError) throw updateError;
+
+      alert(`✅ Verifikasi AP ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke SUBMITTED.`);
+      fetchInvoices();
+
+    } catch (error) {
+      console.error('Error reverse verify:', error);
+      alert('❌ Gagal membatalkan verifikasi: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
+  // ============ HAPUS AP (HANYA DRAFT) ============
+  const handleDelete = async (id: number) => {
+    if (!confirm('Yakin ingin menghapus AP ini? Tindakan ini tidak dapat dibatalkan.')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('vendor_invoices')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      alert('✅ AP berhasil dihapus!');
+      fetchInvoices();
+    } catch (error) {
+      console.error('Error deleting:', error);
+      alert('❌ Gagal menghapus AP: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -859,13 +920,56 @@ console.log('📝 Voucher Generated:', voucherNo);
                     <td className="px-6 py-4 text-sm">{inv.invoice_date}</td>
                     <td className="px-6 py-4 text-sm">{inv.vendor_name}</td>
                     <td className="px-6 py-4 text-right font-mono">{formatCurrency(inv.total)}</td>
-                    <td className="px-6 py-4 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(inv.status)}`}>{getStatusLabel(inv.status)}</span></td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadge(inv.status)}`}>
+                        {getStatusLabel(inv.status)}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button onClick={() => { setSelectedInvoice(inv); setShowDetailModal(true); }} className="p-1 text-blue-600"><Eye className="w-4 h-4" /></button>
-                        {inv.status === 'draft' && <button onClick={() => handleSubmit(inv.id)} className="p-1 text-green-600"><Send className="w-4 h-4" /></button>}
-                        {inv.status === 'submitted' && <button onClick={() => openVerifyModal(inv)} className="p-1 text-yellow-600"><CheckCircle className="w-4 h-4" /></button>}
-                        {(inv.status === 'verified' || inv.status === 'partial') && <button onClick={() => openPaymentModal(inv)} className="p-1 text-red-600"><DollarSign className="w-4 h-4" /></button>}
+                        <button onClick={() => { setSelectedInvoice(inv); setShowDetailModal(true); }} className="p-1 text-blue-600">
+                          <Eye className="w-4 h-4" />
+                        </button>
+
+                        {/* 🔥 REVERSE VERIFIKASI - HANYA UNTUK VERIFIED & SUPER ADMIN */}
+                        {inv.status === 'verified' && user?.role === 'super_admin' && (
+                          <button 
+                            onClick={() => handleReverseVerify(inv)}
+                            className="p-1 text-orange-600 hover:text-orange-800 transition-colors"
+                            title="Batalkan Verifikasi (Super Admin)"
+                          >
+                            <Undo2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* 🔥 HAPUS - HANYA UNTUK DRAFT */}
+                        {inv.status === 'draft' && (
+                          <button 
+                            onClick={() => handleDelete(inv.id)}
+                            className="p-1 text-red-600 hover:text-red-800 transition-colors"
+                            title="Hapus AP"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {inv.status === 'draft' && (
+                          <button onClick={() => handleSubmit(inv.id)} className="p-1 text-green-600">
+                            <Send className="w-4 h-4" />
+                          </button>
+                        )}
+                        
+                        {inv.status === 'submitted' && (
+                          <button onClick={() => openVerifyModal(inv)} className="p-1 text-yellow-600">
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        
+                        {(inv.status === 'verified' || inv.status === 'partial') && (
+                          <button onClick={() => openPaymentModal(inv)} className="p-1 text-red-600">
+                            <DollarSign className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -943,7 +1047,6 @@ console.log('📝 Voucher Generated:', voucherNo);
                 </div>
               </div>
 
-              {/* 🆕 PREVIEW VOUCHER - OTOMATIS BERUBAH SAAT PROJECT BERUBAH */}
               <div>
                 <label className="block font-medium">Preview Voucher</label>
                 <div className="flex items-center gap-2">
@@ -1011,7 +1114,7 @@ console.log('📝 Voucher Generated:', voucherNo);
         </div>
       )}
 
-           {showDetailModal && selectedInvoice && (
+      {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg">
             <div className="flex justify-between"><h2 className="font-display text-xl font-bold">Detail AP</h2><button onClick={() => setShowDetailModal(false)}>✕</button></div>
@@ -1030,7 +1133,6 @@ console.log('📝 Voucher Generated:', voucherNo);
               {selectedInvoice.voucher_no && <p><strong>Voucher:</strong> {selectedInvoice.voucher_no}</p>}
               <a href={selectedInvoice.attachment_url} target="_blank" className="text-blue-600">Lihat Bukti</a>
             </div>
-            {/* 🔥 DOKUMEN TERKAIT - Letakkan DI SINI (di dalam Modal Detail) */}
             {selectedInvoice && (
               <div className="mt-4 pt-4 border-t border-border">
                 <p className="text-sm font-medium text-text mb-2">📎 Dokumen Terkait</p>
@@ -1063,7 +1165,7 @@ console.log('📝 Voucher Generated:', voucherNo);
               <input type="text" placeholder="Nama Bank" value={newVendor.bank_name} onChange={e => setNewVendor({...newVendor, bank_name: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
               <input type="text" placeholder="Nomor Rekening" value={newVendor.bank_account} onChange={e => setNewVendor({...newVendor, bank_account: e.target.value})} className="w-full px-4 py-2 border border-border rounded-lg" />
             </div>
-                                   <div className="flex justify-end gap-3 mt-6">
+            <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowNewVendorModal(false)} className="px-4 py-2 border border-border rounded-lg">Batal</button>
               <button onClick={handleCreateVendor} className="px-4 py-2 bg-accent text-white rounded-lg">Simpan</button>
             </div>

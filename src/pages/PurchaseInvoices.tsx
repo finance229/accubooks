@@ -103,6 +103,11 @@ export default function PurchaseInvoices() {
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ code: '', name: '', budget: 0 });
   
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 7);
+  });
+  
   const [formData, setFormData] = useState({
     vendor_id: 0,
     vendor_name: '',
@@ -135,9 +140,6 @@ export default function PurchaseInvoices() {
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [creditAccountId, setCreditAccountId] = useState(0);
 
-  // ============================================
-  // FETCH COMPANY CODE
-  // ============================================
   useEffect(() => {
     if (currentCompany?.id) {
       fetchCompanyCode();
@@ -146,7 +148,6 @@ export default function PurchaseInvoices() {
 
   const fetchCompanyCode = async () => {
     if (!currentCompany?.id) {
-      console.log('⚠️ No company ID');
       return;
     }
     
@@ -169,9 +170,6 @@ export default function PurchaseInvoices() {
     }
   };
 
-  // ============================================
-  // GENERATE PREVIEW VOUCHER
-  // ============================================
   const generateVoucherPreview = async () => {
     if (!currentCompany?.id || !companyCode) {
       setVoucherPreview('');
@@ -226,9 +224,6 @@ export default function PurchaseInvoices() {
     }
   }, [companyCode, verifyData.projectId, formData.project_id, projects]);
 
-  // ============================================
-  // DATA FETCHING
-  // ============================================
   useEffect(() => {
     if (currentCompany?.id) {
       fetchInvoices();
@@ -237,15 +232,23 @@ export default function PurchaseInvoices() {
       fetchCoa();
       fetchBankAccounts();
     }
-  }, [currentCompany]);
+  }, [currentCompany, selectedMonth]);
 
   const fetchInvoices = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
+    
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    
     const { data } = await supabase
       .from('vendor_invoices')
       .select('*')
       .eq('company_id', currentCompany.id)
+      .gte('invoice_date', startDate)
+      .lte('invoice_date', endDate)
       .order('created_at', { ascending: false });
     setInvoices(data || []);
     setLoading(false);
@@ -442,7 +445,6 @@ export default function PurchaseInvoices() {
     setIncludePph(false);
   };
 
-  // ============ SUBMIT ============
   const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('vendor_invoices')
@@ -454,7 +456,6 @@ export default function PurchaseInvoices() {
     } else alert('Gagal submit');
   };
 
-  // ============ REVERSE SUBMIT (KEMBALI KE DRAFT) ============
   const handleReverseSubmit = async (invoice: PurchaseInvoice) => {
     if (invoice.status !== 'submitted') {
       alert('Hanya status submitted yang bisa dibatalkan!');
@@ -483,7 +484,6 @@ export default function PurchaseInvoices() {
     }
   };
 
-  // ============ EDIT AP (HANYA DRAFT) ============
   const handleEdit = async (invoice: PurchaseInvoice) => {
     if (invoice.status !== 'draft') {
       alert('Hanya AP status draft yang bisa diedit!');
@@ -541,9 +541,6 @@ export default function PurchaseInvoices() {
     } else setBudgetInfo(null);
   };
 
-  // ============================================
-  // HANDLE VERIFY
-  // ============================================
   const handleVerify = async () => {
     if (!selectedInvoice) return;
     if (!verifyData.projectId) {
@@ -672,7 +669,6 @@ export default function PurchaseInvoices() {
     }
   };
 
-  // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
   const handleReverseVerify = async (invoice: PurchaseInvoice) => {
     if (user?.role !== 'super_admin') {
       alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
@@ -734,7 +730,6 @@ export default function PurchaseInvoices() {
     }
   };
 
-  // ============ HAPUS AP (HANYA DRAFT) ============
   const handleDelete = async (id: number) => {
     if (!confirm('Yakin ingin menghapus AP ini? Tindakan ini tidak dapat dibatalkan.')) {
       return;
@@ -947,8 +942,40 @@ export default function PurchaseInvoices() {
 
       <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari nomor AP atau vendor..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
-          <div className="flex gap-2 flex-wrap">{['all','draft','submitted','verified','partial','paid'].map(s => (<button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${filterStatus === s ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>{s === 'all' ? 'Semua' : getStatusLabel(s)}</button>))}</div>
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Periode</label>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-4 py-2.5 border border-border rounded-lg bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Cari nomor AP atau vendor..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {['all','draft','submitted','verified','partial','paid'].map(s => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${
+                  filterStatus === s
+                    ? 'bg-accent text-white'
+                    : 'border border-border hover:bg-background'
+                }`}
+              >
+                {s === 'all' ? 'Semua' : getStatusLabel(s)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -986,7 +1013,6 @@ export default function PurchaseInvoices() {
                           <Eye className="w-4 h-4" />
                         </button>
 
-                        {/* 🔥 REVERSE SUBMIT - UNTUK SUBMITTED (kembali ke draft) */}
                         {inv.status === 'submitted' && (
                           <button 
                             onClick={() => handleReverseSubmit(inv)}
@@ -997,7 +1023,6 @@ export default function PurchaseInvoices() {
                           </button>
                         )}
 
-                        {/* 🔥 REVERSE VERIFIKASI - UNTUK VERIFIED & SUPER ADMIN */}
                         {inv.status === 'verified' && user?.role === 'super_admin' && (
                           <button 
                             onClick={() => handleReverseVerify(inv)}
@@ -1008,7 +1033,6 @@ export default function PurchaseInvoices() {
                           </button>
                         )}
 
-                        {/* 🔥 EDIT - HANYA UNTUK DRAFT */}
                         {inv.status === 'draft' && (
                           <button 
                             onClick={() => handleEdit(inv)}
@@ -1019,7 +1043,6 @@ export default function PurchaseInvoices() {
                           </button>
                         )}
 
-                        {/* 🔥 HAPUS - HANYA UNTUK DRAFT */}
                         {inv.status === 'draft' && (
                           <button 
                             onClick={() => handleDelete(inv.id)}

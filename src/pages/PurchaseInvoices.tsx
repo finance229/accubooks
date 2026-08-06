@@ -442,6 +442,7 @@ export default function PurchaseInvoices() {
     setIncludePph(false);
   };
 
+  // ============ SUBMIT ============
   const handleSubmit = async (id: number) => {
     const { error } = await supabase
       .from('vendor_invoices')
@@ -451,6 +452,60 @@ export default function PurchaseInvoices() {
       alert('AP diajukan ke finance');
       fetchInvoices();
     } else alert('Gagal submit');
+  };
+
+  // ============ REVERSE SUBMIT (KEMBALI KE DRAFT) ============
+  const handleReverseSubmit = async (invoice: PurchaseInvoice) => {
+    if (invoice.status !== 'submitted') {
+      alert('Hanya status submitted yang bisa dibatalkan!');
+      return;
+    }
+
+    if (!confirm(`Yakin ingin membatalkan submit AP ${invoice.invoice_number}?\n\nStatus akan kembali ke DRAFT dan bisa diedit.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('vendor_invoices')
+        .update({ 
+          status: 'draft'
+        })
+        .eq('id', invoice.id);
+
+      if (error) throw error;
+
+      alert(`✅ Submit AP ${invoice.invoice_number} berhasil dibatalkan!\nStatus kembali ke DRAFT dan bisa diedit.`);
+      fetchInvoices();
+    } catch (error) {
+      console.error('Error reverse submit:', error);
+      alert('❌ Gagal membatalkan submit: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
+  // ============ EDIT AP (HANYA DRAFT) ============
+  const handleEdit = async (invoice: PurchaseInvoice) => {
+    if (invoice.status !== 'draft') {
+      alert('Hanya AP status draft yang bisa diedit!');
+      return;
+    }
+
+    setFormData({
+      vendor_id: invoice.vendor_id,
+      vendor_name: invoice.vendor_name,
+      vendor_npwp: invoice.vendor_npwp || '',
+      vendor_address: invoice.vendor_address || '',
+      invoice_number: invoice.invoice_number,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      project_id: invoice.project_id,
+      description: invoice.description || '',
+      amount: invoice.amount,
+    });
+    setVendorSearch(invoice.vendor_name);
+    setIncludePpn(invoice.ppn > 0);
+    setIncludePph(invoice.pph23 > 0);
+    setShowModal(true);
   };
 
   const openVerifyModal = (invoice: PurchaseInvoice) => {
@@ -931,7 +986,18 @@ export default function PurchaseInvoices() {
                           <Eye className="w-4 h-4" />
                         </button>
 
-                        {/* 🔥 REVERSE VERIFIKASI - HANYA UNTUK VERIFIED & SUPER ADMIN */}
+                        {/* 🔥 REVERSE SUBMIT - UNTUK SUBMITTED (kembali ke draft) */}
+                        {inv.status === 'submitted' && (
+                          <button 
+                            onClick={() => handleReverseSubmit(inv)}
+                            className="p-1 text-orange-600 hover:text-orange-800 transition-colors"
+                            title="Batalkan Submit (Kembali ke Draft)"
+                          >
+                            <Undo2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* 🔥 REVERSE VERIFIKASI - UNTUK VERIFIED & SUPER ADMIN */}
                         {inv.status === 'verified' && user?.role === 'super_admin' && (
                           <button 
                             onClick={() => handleReverseVerify(inv)}
@@ -939,6 +1005,17 @@ export default function PurchaseInvoices() {
                             title="Batalkan Verifikasi (Super Admin)"
                           >
                             <Undo2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* 🔥 EDIT - HANYA UNTUK DRAFT */}
+                        {inv.status === 'draft' && (
+                          <button 
+                            onClick={() => handleEdit(inv)}
+                            className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
+                            title="Edit AP"
+                          >
+                            <Edit className="w-4 h-4" />
                           </button>
                         )}
 

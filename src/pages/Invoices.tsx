@@ -632,6 +632,42 @@ export default function Invoices() {
     }
   };
 
+  // ============ HAPUS INVOICE (HANYA DRAFT) ============
+  const handleDeleteInvoice = async (invoice: Invoice) => {
+    if (invoice.status !== 'draft') {
+      alert('Hanya invoice status draft yang bisa dihapus!');
+      return;
+    }
+
+    if (!confirm(`Yakin ingin menghapus invoice ${invoice.invoice_number}?\n\nTindakan ini tidak dapat dibatalkan.`)) {
+      return;
+    }
+
+    try {
+      // 1. Hapus invoice_items terlebih dahulu
+      const { error: itemsError } = await supabase
+        .from('invoice_items')
+        .delete()
+        .eq('invoice_id', invoice.id);
+
+      if (itemsError) throw itemsError;
+
+      // 2. Hapus invoice
+      const { error: invoiceError } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', invoice.id);
+
+      if (invoiceError) throw invoiceError;
+
+      alert(`✅ Invoice ${invoice.invoice_number} berhasil dihapus!`);
+      fetchInvoices();
+    } catch (error) {
+      console.error('Error deleting invoice:', error);
+      alert('❌ Gagal menghapus invoice: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
   const handleOpenPaymentModal = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     const remaining = invoice.total - (invoice.paid_amount || 0);
@@ -1091,6 +1127,7 @@ export default function Invoices() {
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => handleViewDetail(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
                         
+                        {/* 🔥 REVERSE VERIFIKASI - HANYA UNTUK VERIFIED & SUPER ADMIN */}
                         {invoice.status === 'verified' && user?.role === 'super_admin' && (
                           <button 
                             onClick={() => handleReverseVerify(invoice)}
@@ -1098,6 +1135,17 @@ export default function Invoices() {
                             title="Batalkan Verifikasi (Super Admin)"
                           >
                             <Undo2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* 🔥 HAPUS - HANYA UNTUK DRAFT */}
+                        {invoice.status === 'draft' && (
+                          <button 
+                            onClick={() => handleDeleteInvoice(invoice)}
+                            className="p-2 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
+                            title="Hapus Invoice"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                         

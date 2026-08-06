@@ -112,11 +112,15 @@ export default function Invoices() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   
-  // ============ STATE DOWNLOAD MODAL ============
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloadInvoice, setDownloadInvoice] = useState<Invoice | null>(null);
   const [downloadType, setDownloadType] = useState<'invoice' | 'kwitansi'>('invoice');
   const [showSignature, setShowSignature] = useState(true);
+  
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 7);
+  });
   
   const [formData, setFormData] = useState({
     customer_id: 0,
@@ -148,15 +152,23 @@ export default function Invoices() {
       fetchProjects();
       fetchBankAccounts();
     }
-  }, [currentCompany]);
+  }, [currentCompany, selectedMonth]);
 
   const fetchInvoices = async () => {
     if (!currentCompany?.id) return;
     setLoading(true);
+    
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    
     const { data } = await supabase
       .from('invoices')
       .select('*')
       .eq('company_id', currentCompany.id)
+      .gte('invoice_date', startDate)
+      .lte('invoice_date', endDate)
       .order('created_at', { ascending: false });
     setInvoices(data || []);
     setLoading(false);
@@ -574,7 +586,6 @@ export default function Invoices() {
     }
   };
 
-  // ============ REVERSE VERIFIKASI (HANYA SUPER ADMIN) ============
   const handleReverseVerify = async (invoice: Invoice) => {
     if (user?.role !== 'super_admin') {
       alert('⚠️ Hanya Super Admin yang bisa membatalkan verifikasi!');
@@ -632,7 +643,6 @@ export default function Invoices() {
     }
   };
 
-  // ============ HAPUS INVOICE (HANYA DRAFT) ============
   const handleDeleteInvoice = async (invoice: Invoice) => {
     if (invoice.status !== 'draft') {
       alert('Hanya invoice status draft yang bisa dihapus!');
@@ -644,7 +654,6 @@ export default function Invoices() {
     }
 
     try {
-      // 1. Hapus invoice_items terlebih dahulu
       const { error: itemsError } = await supabase
         .from('invoice_items')
         .delete()
@@ -652,7 +661,6 @@ export default function Invoices() {
 
       if (itemsError) throw itemsError;
 
-      // 2. Hapus invoice
       const { error: invoiceError } = await supabase
         .from('invoices')
         .delete()
@@ -845,7 +853,6 @@ export default function Invoices() {
     fetchInvoices();
   };
 
-  // ============ OPEN DOWNLOAD MODAL ============
   const openDownloadModal = (invoice: Invoice, type: 'invoice' | 'kwitansi') => {
     setDownloadInvoice(invoice);
     setDownloadType(type);
@@ -853,7 +860,6 @@ export default function Invoices() {
     setShowDownloadModal(true);
   };
 
-  // ============ GENERATE PDF DARI MODAL ============
   const handleGenerateDownload = async () => {
     if (!downloadInvoice) return;
 
@@ -875,7 +881,6 @@ export default function Invoices() {
         .eq('id', downloadInvoice.customer_id)
         .single();
 
-      // 🔥 PAKAI REKENING DARI INVOICE
       let bankAccount = null;
       if (downloadInvoice.bank_account_id) {
         const { data: bankData } = await supabase
@@ -1089,12 +1094,43 @@ export default function Invoices() {
 
       <div className="bg-surface rounded-xl border border-border p-6">
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" /><input type="text" placeholder="Cari invoice..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg" /></div>
-          <div className="flex gap-2 flex-wrap">{['all','draft','sent','verified','partial','paid'].map(s => (<button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${filterStatus === s ? 'bg-accent text-white' : 'border border-border hover:bg-background'}`}>{s === 'all' ? 'Semua' : getStatusLabel(s)}</button>))}</div>
+          <div>
+            <label className="block text-xs font-medium text-text-muted mb-1">Periode</label>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="px-4 py-2.5 border border-border rounded-lg bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Cari invoice..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {['all','draft','sent','verified','partial','paid'].map(s => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium capitalize ${
+                  filterStatus === s
+                    ? 'bg-accent text-white'
+                    : 'border border-border hover:bg-background'
+                }`}
+              >
+                {s === 'all' ? 'Semua' : getStatusLabel(s)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Tabel Invoice */}
       <div className="bg-surface rounded-xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -1127,7 +1163,6 @@ export default function Invoices() {
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => handleViewDetail(invoice)} className="p-2 text-text-muted hover:text-info hover:bg-info/10 rounded-lg"><Eye className="w-4 h-4" /></button>
                         
-                        {/* 🔥 REVERSE VERIFIKASI - HANYA UNTUK VERIFIED & SUPER ADMIN */}
                         {invoice.status === 'verified' && user?.role === 'super_admin' && (
                           <button 
                             onClick={() => handleReverseVerify(invoice)}
@@ -1138,7 +1173,6 @@ export default function Invoices() {
                           </button>
                         )}
 
-                        {/* 🔥 HAPUS - HANYA UNTUK DRAFT */}
                         {invoice.status === 'draft' && (
                           <button 
                             onClick={() => handleDeleteInvoice(invoice)}
@@ -1178,7 +1212,6 @@ export default function Invoices() {
         </div>
       </div>
 
-      {/* Modal Buat/Edit Invoice */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-surface rounded-xl p-6 w-full max-w-4xl my-8">
@@ -1187,7 +1220,6 @@ export default function Invoices() {
               <button onClick={() => { setShowModal(false); resetForm(); }}><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-4">
-              {/* Customer */}
               <div className="relative">
                 <label className="block text-sm font-medium mb-1">Customer *</label>
                 <div className="flex gap-2">
@@ -1221,7 +1253,6 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {/* Template & PPN */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Template Invoice</label>
@@ -1281,7 +1312,6 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {/* Pilih Rekening Bank */}
               <div>
                 <label className="block text-sm font-medium mb-1">Rekening Bank / Kas *</label>
                 <select
@@ -1301,7 +1331,6 @@ export default function Invoices() {
                 </p>
               </div>
 
-              {/* Item Table */}
               <div>
                 <label className="block text-sm font-medium mb-1">Item</label>
                 <button onClick={addItem} className="text-sm text-accent mb-2">+ Tambah Item</button>
@@ -1401,7 +1430,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Modal Pembayaran */}
       {showPaymentModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -1452,7 +1480,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Modal Customer Baru */}
       {showNewCustomerModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -1471,7 +1498,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Modal Proyek Baru */}
       {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -1489,7 +1515,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Modal Detail */}
       {showDetailModal && selectedInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
@@ -1513,7 +1538,6 @@ export default function Invoices() {
               )}
             </div>
 
-            {/* Items List */}
             <div className="mt-4 pt-4 border-t border-border">
               <p className="text-sm font-medium text-text mb-2">📋 Items</p>
               {invoiceItems.length === 0 ? (
@@ -1559,7 +1583,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* ============ MODAL DOWNLOAD ============ */}
       {showDownloadModal && downloadInvoice && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -1591,7 +1614,6 @@ export default function Invoices() {
                 </p>
               </div>
 
-              {/* HANYA CHECKBOX TTD - TANPA DROPDOWN REKENING */}
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
@@ -1624,7 +1646,6 @@ export default function Invoices() {
         </div>
       )}
 
-      {/* Aging Modal */}
       {showAgingModal && (
         <AgingModal
           isOpen={showAgingModal}

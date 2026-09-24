@@ -50,7 +50,6 @@ export default function ClosingBook() {
   const [selectedPeriod, setSelectedPeriod] = useState(() => {
     const now = new Date();
     // Default: bulan lalu (karena baru bisa tutup di akhir bulan)
-    // Kalau tanggal >= 28, pakai bulan ini. Kalau tidak, pakai bulan lalu.
     if (now.getDate() >= 28) {
       return now.toISOString().slice(0, 7);
     } else {
@@ -81,11 +80,84 @@ export default function ClosingBook() {
     setLoading(false);
   };
 
-  // 🔥 CEK APAKAH BISA TUTUP BUKU (TANGGAL >= 28 ATAU TANGGAL 1)
-  const canCloseBook = () => {
-    const today = new Date();
-    const day = today.getDate();
-    return day >= 28 || day === 1;
+  // 🔥 CEK APAKAH BISA TUTUP BUKU (TGL 28 s/d H+7 SETELAH AKHIR BULAN, JAM 23:59)
+  const canCloseBook = (period?: string) => {
+    const targetPeriod = period || selectedPeriod;
+    const [year, month] = targetPeriod.split('-').map(Number);
+    
+    // Awal bulan periode (tanggal 28)
+    const startDate = new Date(year, month - 1, 28);  // month JS 0-index
+    startDate.setHours(0, 0, 0, 0);
+    
+    // Akhir bulan
+    const lastDayOfMonth = new Date(year, month, 0);
+    lastDayOfMonth.setHours(23, 59, 59, 999);
+    
+    // Deadline H+7
+    const deadline = new Date(lastDayOfMonth);
+    deadline.setDate(deadline.getDate() + 7);
+    deadline.setHours(23, 59, 59, 999);
+    
+    const now = new Date();
+    
+    // Bisa tutup buku kalau:
+    // 1. Sudah lewat tanggal 28 bulan itu
+    // 2. Belum lewat deadline H+7
+    return now >= startDate && now <= deadline;
+  };
+
+  // 🔥 CEK APAKAH SUDAH LEWAT DEADLINE
+  const isPastDeadline = (period?: string) => {
+    const targetPeriod = period || selectedPeriod;
+    const [year, month] = targetPeriod.split('-').map(Number);
+    
+    const lastDayOfMonth = new Date(year, month, 0);
+    const deadline = new Date(lastDayOfMonth);
+    deadline.setDate(deadline.getDate() + 7);
+    deadline.setHours(23, 59, 59, 999);
+    
+    return new Date() > deadline;
+  };
+
+  // 🔥 CEK APAKAH BELUM WAKTUNYA
+  const isBeforeStart = (period?: string) => {
+    const targetPeriod = period || selectedPeriod;
+    const [year, month] = targetPeriod.split('-').map(Number);
+    
+    const startDate = new Date(year, month - 1, 28);
+    startDate.setHours(0, 0, 0, 0);
+    
+    return new Date() < startDate;
+  };
+
+  // 🔥 FORMAT DEADLINE
+  const getDeadlineText = (period?: string) => {
+    const targetPeriod = period || selectedPeriod;
+    const [year, month] = targetPeriod.split('-').map(Number);
+    
+    const lastDayOfMonth = new Date(year, month, 0);
+    const deadline = new Date(lastDayOfMonth);
+    deadline.setDate(deadline.getDate() + 7);
+    
+    return deadline.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }) + ' 23:59';
+  };
+
+  // 🔥 FORMAT START DATE
+  const getStartDateText = (period?: string) => {
+    const targetPeriod = period || selectedPeriod;
+    const [year, month] = targetPeriod.split('-').map(Number);
+    
+    const startDate = new Date(year, month - 1, 28);
+    
+    return startDate.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
   };
 
   // 🔥 PREVIEW TUTUP BUKU
@@ -117,14 +189,31 @@ export default function ClosingBook() {
 
       const activeAssets = assets || [];
 
+      console.log('📊 Active assets:', activeAssets.length);
+      console.log('📊 Assets detail:', activeAssets.map(a => ({
+        id: a.id,
+        code: a.code,
+        name: a.name,
+        type: a.asset_type,
+        cost: a.acquisition_cost,
+        salvage: a.salvage_value,
+        useful_life: a.useful_life,
+        expense_acc: a.expense_account_id,
+        accumulated_acc: a.accumulated_account_id,
+      })));
+
       // Filter aset yang belum digenerate bulan ini
       const { data: existingHistory } = await supabase
         .from('depreciation_history')
         .select('asset_id')
         .eq('period', selectedPeriod);
 
+      console.log('📊 Existing history period', selectedPeriod, ':', existingHistory);
+
       const existingAssetIds = new Set(existingHistory?.map(h => h.asset_id) || []);
       const dueAssets = activeAssets.filter(a => !existingAssetIds.has(a.id));
+
+      console.log('📊 Due assets:', dueAssets.length);
 
       const tangibleAssets = dueAssets.filter(a => a.asset_type === 'tangible');
       const intangibleAssets = dueAssets.filter(a => a.asset_type === 'intangible');
@@ -133,14 +222,14 @@ export default function ClosingBook() {
       let depTotal = 0;
       tangibleAssets.forEach(a => {
         const depreciableAmount = a.acquisition_cost - (a.salvage_value || 0);
-        const monthly = depreciableAmount / a.useful_life / 12;
+        const monthly = a.useful_life > 0 ? depreciableAmount / a.useful_life / 12 : 0;
         depTotal += Math.round(monthly);
       });
 
       let amortTotal = 0;
       intangibleAssets.forEach(a => {
         const depreciableAmount = a.acquisition_cost - (a.salvage_value || 0);
-        const monthly = depreciableAmount / a.useful_life / 12;
+        const monthly = a.useful_life > 0 ? depreciableAmount / a.useful_life / 12 : 0;
         amortTotal += Math.round(monthly);
       });
 
@@ -182,8 +271,8 @@ export default function ClosingBook() {
       return;
     }
 
-    if (!canCloseBook()) {
-      alert('⚠️ Tutup buku hanya bisa dilakukan di akhir bulan (tanggal >= 28) atau tanggal 1!');
+    if (!canCloseBook(preview.period)) {
+      alert(`⚠️ Tutup buku hanya bisa dilakukan mulai ${getStartDateText(preview.period)} s/d ${getDeadlineText(preview.period)}!`);
       return;
     }
 
@@ -195,7 +284,7 @@ export default function ClosingBook() {
     };
 
     try {
-      const [year, month] = selectedPeriod.split('-').map(Number);
+      const [year, month] = preview.period.split('-').map(Number);
       const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
@@ -211,12 +300,12 @@ export default function ClosingBook() {
       const { data: existingHistory } = await supabase
         .from('depreciation_history')
         .select('asset_id')
-        .eq('period', selectedPeriod);
+        .eq('period', preview.period);
 
       const existingAssetIds = new Set(existingHistory?.map(h => h.asset_id) || []);
       const dueAssets = activeAssets.filter(a => !existingAssetIds.has(a.id));
 
-      // Ambil COA untuk expense & accumulated
+      // Ambil COA
       const { data: coaList } = await supabase
         .from('coa')
         .select('id, code, name, type')
@@ -225,7 +314,7 @@ export default function ClosingBook() {
       for (const asset of dueAssets) {
         try {
           const depreciableAmount = asset.acquisition_cost - (asset.salvage_value || 0);
-          const monthly = Math.round(depreciableAmount / asset.useful_life / 12);
+          const monthly = asset.useful_life > 0 ? Math.round(depreciableAmount / asset.useful_life / 12) : 0;
           
           if (monthly <= 0) continue;
 
@@ -241,7 +330,8 @@ export default function ClosingBook() {
           const accumulatedAccount = coaList?.find(c => c.id === accumulatedAccountId);
 
           if (!expenseAccount || !accumulatedAccount) {
-            summary[asset.asset_type === 'tangible' ? 'depreciation' : 'amortization'].failed++;
+            const key = asset.asset_type === 'tangible' ? 'depreciation' : 'amortization';
+            summary[key].failed++;
             continue;
           }
 
@@ -264,21 +354,22 @@ export default function ClosingBook() {
           ];
 
           const description = asset.asset_type === 'tangible' 
-            ? `Penyusutan ${asset.name} (${asset.code}) - ${selectedPeriod}`
-            : `Amortisasi ${asset.name} (${asset.code}) - ${selectedPeriod}`;
+            ? `Penyusutan ${asset.name} (${asset.code}) - ${preview.period}`
+            : `Amortisasi ${asset.name} (${asset.code}) - ${preview.period}`;
 
           const journalId = await createGeneralJournal(
             currentCompany.id,
             endDate,
             description,
-            `CLOSING-${selectedPeriod}`,
+            `CLOSING-${preview.period}`,
             'DEPRECIATION',
             asset.id,
             entries
           );
 
           if (!journalId) {
-            summary[asset.asset_type === 'tangible' ? 'depreciation' : 'amortization'].failed++;
+            const key = asset.asset_type === 'tangible' ? 'depreciation' : 'amortization';
+            summary[key].failed++;
             continue;
           }
 
@@ -301,7 +392,7 @@ export default function ClosingBook() {
             .from('depreciation_history')
             .insert({
               asset_id: asset.id,
-              period: selectedPeriod,
+              period: preview.period,
               amount: monthly,
               accumulated_depreciation: newAccumulated,
               book_value: newBookValue,
@@ -314,7 +405,8 @@ export default function ClosingBook() {
           summary[key].success++;
         } catch (err) {
           console.error('Error generating:', err);
-          summary[asset.asset_type === 'tangible' ? 'depreciation' : 'amortization'].failed++;
+          const key = asset.asset_type === 'tangible' ? 'depreciation' : 'amortization';
+          summary[key].failed++;
         }
       }
 
@@ -346,12 +438,12 @@ export default function ClosingBook() {
         }
       }
 
-      // ============ 3. SIMPAN HISTORY TUTUP BUKU ============
+      // ============ 3. SIMPAN HISTORY ============
       await supabase
         .from('closing_periods')
         .insert({
           company_id: currentCompany.id,
-          period: selectedPeriod,
+          period: preview.period,
           closed_by: user?.email,
           closed_at: new Date().toISOString(),
           status: 'closed',
@@ -363,12 +455,12 @@ export default function ClosingBook() {
         .from('locked_periods')
         .insert({
           company_id: currentCompany.id,
-          period: selectedPeriod,
+          period: preview.period,
           locked_by: user?.email,
         });
 
       setLastReport({
-        period: selectedPeriod,
+        period: preview.period,
         summary: summary,
         closedBy: user?.email,
         closedAt: new Date().toISOString(),
@@ -393,35 +485,55 @@ export default function ClosingBook() {
       return;
     }
 
-    if (!confirm(`Yakin ingin membuka kembali periode ${history.period}?\n\nJurnal yang terkait dengan penyusutan akan dihapus dan periode akan dibuka.`)) {
+    if (!confirm(`Yakin ingin membuka kembali periode ${history.period}?\n\nJurnal penyusutan yang terkait akan dihapus dan periode akan dibuka.`)) {
       return;
     }
 
     try {
-      const [year, month] = history.period.split('-').map(Number);
-      const lastDay = new Date(year, month, 0).getDate();
-      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-      // 1. Hapus jurnal yang terkait dengan tutup buku ini
+      // 1. Ambil jurnal penyusutan periode ini
       const { data: depHistories } = await supabase
         .from('depreciation_history')
-        .select('journal_id')
+        .select('journal_id, asset_id, amount, period')
         .eq('period', history.period);
 
       const journalIds = (depHistories || []).map(h => h.journal_id).filter(Boolean);
 
+      // 2. Hapus jurnal & lines
       if (journalIds.length > 0) {
         await supabase.from('journal_lines').delete().in('journal_id', journalIds);
         await supabase.from('journals').delete().in('id', journalIds);
       }
 
-      // 2. Hapus history penyusutan periode ini
+      // 3. Kembalikan nilai aset (kurangi accumulated)
+      for (const h of depHistories || []) {
+        const { data: asset } = await supabase
+          .from('fixed_assets')
+          .select('accumulated_depreciation, acquisition_cost, total_depreciation_generated')
+          .eq('id', h.asset_id)
+          .single();
+
+        if (asset) {
+          const newAccumulated = Math.max(0, (asset.accumulated_depreciation || 0) - h.amount);
+          const newBookValue = asset.acquisition_cost - newAccumulated;
+          
+          await supabase
+            .from('fixed_assets')
+            .update({
+              accumulated_depreciation: newAccumulated,
+              book_value: newBookValue,
+              total_depreciation_generated: Math.max(0, (asset.total_depreciation_generated || 1) - 1),
+            })
+            .eq('id', h.asset_id);
+        }
+      }
+
+      // 4. Hapus history penyusutan periode ini
       await supabase
         .from('depreciation_history')
         .delete()
         .eq('period', history.period);
 
-      // 3. Update status closing period
+      // 5. Update status closing
       await supabase
         .from('closing_periods')
         .update({ 
@@ -430,15 +542,12 @@ export default function ClosingBook() {
         })
         .eq('id', history.id);
 
-      // 4. Hapus lock
+      // 6. Hapus lock
       await supabase
         .from('locked_periods')
         .delete()
         .eq('company_id', history.company_id)
         .eq('period', history.period);
-
-      // 5. Kembalikan jurnal yang tadi diposting ke draft? (opsional)
-      // Skip dulu untuk kesederhanaan
 
       alert(`✅ Periode ${history.period} berhasil dibuka kembali!`);
       fetchHistories();
@@ -495,7 +604,8 @@ export default function ClosingBook() {
           <div className="text-sm">
             <p className="font-semibold text-info mb-1">ℹ️ Informasi</p>
             <ul className="text-text-muted space-y-1 list-disc list-inside">
-              <li>Tutup buku hanya bisa dilakukan <strong>di akhir bulan (tanggal ≥ 28) atau tanggal 1</strong></li>
+              <li>Tutup buku hanya bisa dilakukan mulai <strong>tanggal 28 s/d H+7 setelah akhir bulan (23:59)</strong></li>
+              <li>Contoh: Periode Juli 2026 → bisa ditutup dari <strong>28 Juli s/d 7 Agustus 2026, 23:59</strong></li>
               <li>Proses ini akan otomatis: <strong>generate penyusutan, amortisasi, dan posting semua jurnal draft</strong></li>
               <li>Setelah tutup buku, periode akan <strong>terkunci</strong> - tidak bisa edit jurnal bulan itu</li>
               <li>Hanya <strong>Super Admin</strong> yang bisa membuka kembali (reverse)</li>
@@ -522,19 +632,33 @@ export default function ClosingBook() {
               className="w-full px-4 py-2.5 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
-          <div className="md:col-span-2 flex gap-3">
-            <button
-              onClick={handlePreview}
-              disabled={loading}
-              className="flex items-center gap-2 px-6 py-2.5 bg-info/10 text-info border border-info/30 rounded-lg hover:bg-info/20 transition-colors disabled:opacity-50"
-            >
-              <Eye className="w-5 h-5" />
-              Preview
-            </button>
-            {!canCloseBook() && (
-              <div className="flex items-center text-warning text-sm gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Hanya bisa dijalankan di akhir bulan (tgl ≥ 28) atau tanggal 1
+          <div className="md:col-span-2 flex flex-col gap-2">
+            <div className="flex gap-3">
+              <button
+                onClick={handlePreview}
+                disabled={loading}
+                className="flex items-center gap-2 px-6 py-2.5 bg-info/10 text-info border border-info/30 rounded-lg hover:bg-info/20 transition-colors disabled:opacity-50"
+              >
+                <Eye className="w-5 h-5" />
+                Preview
+              </button>
+            </div>
+            
+            {/* 🔥 INFO STATUS DEADLINE */}
+            {canCloseBook(selectedPeriod) ? (
+              <div className="flex items-center text-success text-xs gap-2">
+                <CheckCircle className="w-3 h-3" />
+                ✅ Bisa tutup buku. Deadline: {getDeadlineText(selectedPeriod)}
+              </div>
+            ) : isPastDeadline(selectedPeriod) ? (
+              <div className="flex items-center text-danger text-xs gap-2">
+                <XCircle className="w-3 h-3" />
+                ❌ Batas waktu sudah lewat (deadline: {getDeadlineText(selectedPeriod)})
+              </div>
+            ) : (
+              <div className="flex items-center text-warning text-xs gap-2">
+                <AlertTriangle className="w-3 h-3" />
+                ⏳ Belum waktunya. Bisa dijalankan mulai {getStartDateText(selectedPeriod)} s/d {getDeadlineText(selectedPeriod)}
               </div>
             )}
           </div>
@@ -691,25 +815,44 @@ export default function ClosingBook() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowPreviewModal(false)}
-                className="px-4 py-2 border border-border rounded-lg hover:bg-background"
-              >
-                Batal
-              </button>
-              {!preview.alreadyClosed && canCloseBook() && (
+            <div className="flex justify-between items-center mt-6">
+              <div>
+                {!preview.alreadyClosed && canCloseBook(preview.period) && (
+                  <div className="text-xs text-success flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    Deadline: {getDeadlineText(preview.period)}
+                  </div>
+                )}
+                {!preview.alreadyClosed && !canCloseBook(preview.period) && (
+                  <div className="text-xs text-warning flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    {isPastDeadline(preview.period) 
+                      ? `Batas waktu sudah lewat (${getDeadlineText(preview.period)})`
+                      : `Bisa dijalankan mulai ${getStartDateText(preview.period)}`
+                    }
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3">
                 <button
-                  onClick={() => {
-                    setShowPreviewModal(false);
-                    setShowConfirmModal(true);
-                  }}
-                  className="flex items-center gap-2 px-6 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover"
+                  onClick={() => setShowPreviewModal(false)}
+                  className="px-4 py-2 border border-border rounded-lg hover:bg-background"
                 >
-                  <Lock className="w-4 h-4" />
-                  Tutup Buku Sekarang
+                  Batal
                 </button>
-              )}
+                {!preview.alreadyClosed && canCloseBook(preview.period) && (
+                  <button
+                    onClick={() => {
+                      setShowPreviewModal(false);
+                      setShowConfirmModal(true);
+                    }}
+                    className="flex items-center gap-2 px-6 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover"
+                  >
+                    <Lock className="w-4 h-4" />
+                    Tutup Buku Sekarang
+                  </button>
+                )}
+              </div>
             </div>
           </motion.div>
         </div>
@@ -810,7 +953,7 @@ export default function ClosingBook() {
             </div>
 
             {(() => {
-              const report = lastReport || selectedHistory?.summary;
+              const report = lastReport?.summary || selectedHistory?.summary;
               const period = lastReport?.period || selectedHistory?.period;
               const closedBy = lastReport?.closedBy || selectedHistory?.closed_by;
               const closedAt = lastReport?.closedAt || selectedHistory?.closed_at;
@@ -834,7 +977,6 @@ export default function ClosingBook() {
                     </div>
                   </div>
 
-                  {/* Ringkasan Penyusutan */}
                   {report?.depreciation && (
                     <div className="bg-info/10 rounded-lg p-4 border border-info/30">
                       <p className="font-semibold text-info mb-2">📊 Penyusutan Aset Tetap</p>
@@ -855,7 +997,6 @@ export default function ClosingBook() {
                     </div>
                   )}
 
-                  {/* Ringkasan Amortisasi */}
                   {report?.amortization && (
                     <div className="bg-purple-50 rounded-lg p-4 border border-purple-300">
                       <p className="font-semibold text-purple-600 mb-2">📊 Amortisasi Aset Tidak Berwujud</p>
@@ -876,7 +1017,6 @@ export default function ClosingBook() {
                     </div>
                   )}
 
-                  {/* Ringkasan Jurnal */}
                   {report?.postedJournals && (
                     <div className="bg-success/10 rounded-lg p-4 border border-success/30">
                       <p className="font-semibold text-success mb-2">📊 Jurnal Draft Diposting</p>

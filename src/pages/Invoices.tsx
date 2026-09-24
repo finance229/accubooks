@@ -253,51 +253,51 @@ export default function Invoices() {
   );
 
   const updateItemMeta = (index: number, fieldKey: string, value: any) => {
-  const newItems = [...formData.items];
-  const item = newItems[index];
-  if (!item.meta) item.meta = {};
-  item.meta[fieldKey] = value;
+    const newItems = [...formData.items];
+    const item = newItems[index];
+    if (!item.meta) item.meta = {};
+    item.meta[fieldKey] = value;
 
-  if (fieldKey === 'description') {
-    item.description = value;
-  }
+    if (fieldKey === 'description') {
+      item.description = value;
+    }
 
-  if (selectedTemplate === 'general') {
-    const qty = parseFloat(item.meta.quantity) || 1;
-    const price = parseFloat(item.meta.unit_price) || 0;
-    const disc = parseFloat(item.meta.discount) || 0;
-    item.amount = (qty * price) - disc;
-    item.quantity = qty;
-    item.unit_price = price;
-    item.discount = disc;
-  } else if (selectedTemplate === 'a') {
-    const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
-    const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
-    item.amount = hargaRitase + hargaMultiDrop;
-    item.quantity = 1;
-    item.unit_price = item.amount;
-  } else if (selectedTemplate === 'b') {
-    const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
-    item.amount = hargaRitase;
-    item.quantity = 1;
-    item.unit_price = item.amount;
-  } else if (selectedTemplate === 'c') {
-    const harga = parseFloat(item.meta.harga) || 0;
-    item.amount = harga;
-    item.quantity = 1;
-    item.unit_price = item.amount;
-  } else if (selectedTemplate === 'd') {
-    // 🔥 TEMPLATE D - Mayora
-    const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
-    const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
-    const reimburse = parseFloat(item.meta.reimburse_unloading) || 0;
-    item.amount = hargaRitase + hargaMultiDrop + reimburse;
-    item.quantity = 1;
-    item.unit_price = item.amount;
-  }
+    if (selectedTemplate === 'general') {
+      const qty = parseFloat(item.meta.quantity) || 1;
+      const price = parseFloat(item.meta.unit_price) || 0;
+      const disc = parseFloat(item.meta.discount) || 0;
+      item.amount = (qty * price) - disc;
+      item.quantity = qty;
+      item.unit_price = price;
+      item.discount = disc;
+    } else if (selectedTemplate === 'a') {
+      const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
+      const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
+      item.amount = hargaRitase + hargaMultiDrop;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    } else if (selectedTemplate === 'b') {
+      const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
+      item.amount = hargaRitase;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    } else if (selectedTemplate === 'c') {
+      const harga = parseFloat(item.meta.harga) || 0;
+      item.amount = harga;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    } else if (selectedTemplate === 'd') {
+      // 🔥 TEMPLATE D (Mayora)
+      const hargaRitase = parseFloat(item.meta.harga_ritase) || 0;
+      const hargaMultiDrop = parseFloat(item.meta.harga_multi_drop) || 0;
+      const reimburse = parseFloat(item.meta.reimburse_unloading) || 0;
+      item.amount = hargaRitase + hargaMultiDrop + reimburse;
+      item.quantity = 1;
+      item.unit_price = item.amount;
+    }
 
-  setFormData({ ...formData, items: newItems });
-};
+    setFormData({ ...formData, items: newItems });
+  };
 
   const addItem = () => {
     const fields = getTemplateFields(selectedTemplate);
@@ -394,13 +394,18 @@ export default function Invoices() {
       return;
     }
 
-    const emptyDesc = formData.items.some(item => {
-      const desc = item.description || item.meta?.description || '';
-      return desc.trim() === '';
-    });
-    if (emptyDesc) {
-      alert('Semua item harus memiliki deskripsi!');
-      return;
+    // 🔥 Validasi deskripsi HANYA untuk template General
+    const templateHasDescription = selectedTemplate === 'general';
+
+    if (templateHasDescription) {
+      const emptyDesc = formData.items.some(item => {
+        const desc = item.description || item.meta?.description || '';
+        return desc.trim() === '';
+      });
+      if (emptyDesc) {
+        alert('Semua item harus memiliki deskripsi!');
+        return;
+      }
     }
 
     if (!currentCompany?.id) return;

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Receipt, FileText, Users, Settings, Menu, X, 
   TrendingUp, FolderOpen, CreditCard, FolderKanban, Truck, 
   BookOpen, BookMarked, Book, BarChart3, Repeat, Database, 
-  ChevronDown, ChevronRight, LogOut 
+  ChevronDown, ChevronRight, LogOut, Lock
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
@@ -19,24 +19,18 @@ type MenuItem = {
 type MenuGroup = {
   name: string;
   icon: any;
-  items?: MenuItem[]; // items jadi optional
-  isSingle?: boolean; // flag untuk single link
-  to?: string; // untuk single link
+  items?: MenuItem[];
+  isSingle?: boolean;
+  to?: string;
 };
 
 const menuGroups: MenuGroup[] = [
-  // ============================================
-  // DASHBOARD - SINGLE LINK (LANGSUNG, TANPA DROPDOWN)
-  // ============================================
   {
     name: 'Dashboard',
     icon: LayoutDashboard,
     isSingle: true,
     to: '/dashboard',
   },
-  // ============================================
-  // MENU LAINNYA (TETAP DENGAN DROPDOWN)
-  // ============================================
   {
     name: 'Akuntansi & Keuangan',
     icon: Database,
@@ -66,6 +60,7 @@ const menuGroups: MenuGroup[] = [
       { name: 'Fixed Assets', to: '/fixed-assets', icon: TrendingUp },
       { name: 'Transaksi Berulang', to: '/recurring-transactions', icon: Repeat },
       { name: 'Payroll', to: '/payroll', icon: Receipt },
+      { name: 'Tutup Buku', to: '/closing-book', icon: Lock },
     ]
   },
   {
@@ -110,12 +105,10 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-sidebar transform transition-transform duration-300 lg:translate-x-0 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
         <div className="flex h-full flex-col">
-          {/* LOGO */}
           <div className="flex h-16 items-center justify-between px-6 border-b border-white/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center">
@@ -128,14 +121,10 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* NAVIGATION */}
           <nav className="flex-1 px-4 py-6 overflow-y-auto">
             {menuGroups.map((group) => {
               const Icon = group.icon;
               
-              // ============================================
-              // SINGLE LINK (Dashboard)
-              // ============================================
               if (group.isSingle && group.to) {
                 return (
                   <div key={group.name} className="mb-2">
@@ -157,9 +146,6 @@ export default function Layout() {
                 );
               }
               
-              // ============================================
-              // GROUP WITH DROPDOWN
-              // ============================================
               const isExpanded = expandedGroups.has(group.name);
               const hasItems = group.items && group.items.length > 0;
               
@@ -204,7 +190,6 @@ export default function Layout() {
             })}
           </nav>
 
-          {/* USER INFO */}
           <div className="p-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-hover">
               <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
@@ -230,12 +215,9 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* OVERLAY */}
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
-      {/* MAIN CONTENT */}
       <div className="lg:pl-64">
-        {/* HEADER */}
         <header className="sticky top-0 z-30 h-16 bg-surface border-b border-border flex items-center justify-between px-6">
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-text-muted hover:text-text">
             <Menu className="w-6 h-6" />
@@ -250,7 +232,6 @@ export default function Layout() {
           </div>
         </header>
 
-        {/* PAGE CONTENT */}
         <main className="p-6">
           <Outlet />
         </main>

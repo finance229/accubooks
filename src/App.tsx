@@ -24,7 +24,8 @@ import IncomeStatement from './pages/IncomeStatement';
 import BalanceSheet from './pages/BalanceSheet';
 import RecurringTransactions from './pages/RecurringTransactions';
 import ReportsGeneral from './pages/ReportsGeneral';
-import Payroll from './pages/Payroll';  // ✅ IMPORT SUDAH ADA
+import Payroll from './pages/Payroll';
+import ClosingBook from './pages/ClosingBook';
 
 function App() {
   return (
@@ -59,7 +60,8 @@ function App() {
               <Route path="balance-sheet" element={<BalanceSheet />} />
               <Route path="recurring-transactions" element={<RecurringTransactions />} />
               <Route path="reports-general" element={<ReportsGeneral />} />
-              <Route path="payroll" element={<Payroll />} />  {/* 🔥 TAMBAHKAN INI */}
+              <Route path="payroll" element={<Payroll />} />
+              <Route path="closing-book" element={<ClosingBook />} />
             </Route>
           </Routes>
         </CompanyProvider>

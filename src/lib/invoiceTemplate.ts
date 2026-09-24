@@ -14,6 +14,7 @@ export function generateInvoiceHTML(
     case 'a': return generateTemplateA(invoice, company, customer, items, bankAccount, showSignature);
     case 'b': return generateTemplateB(invoice, company, customer, items, bankAccount, showSignature);
     case 'c': return generateTemplateC(invoice, company, customer, items, bankAccount, showSignature);
+    case 'd': return generateTemplateD(invoice, company, customer, items, bankAccount, showSignature);
     default: return generateTemplateGeneral(invoice, company, customer, items, bankAccount, showSignature);
   }
 }
@@ -294,7 +295,7 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
 }
 
 // ============================================================
-// TEMPLATE A
+// TEMPLATE A - YCH
 // ============================================================
 function generateTemplateA(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -331,7 +332,7 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
 }
 
 // ============================================================
-// TEMPLATE B
+// TEMPLATE B - BALIKAN
 // ============================================================
 function generateTemplateB(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -367,7 +368,7 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
 }
 
 // ============================================================
-// TEMPLATE C
+// TEMPLATE C - Mowilex
 // ============================================================
 function generateTemplateC(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -399,5 +400,43 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
 
   return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'c', bankAccount, showSignature, {
     tableHeaders: ['DESCRIPTION', 'Tanggal', 'Keterangan', 'Unit', 'No. Pol', 'No Kontrak', 'Harga', 'Jumlah']
+  });
+}
+
+// ============================================================
+// TEMPLATE D - Mayora
+// ============================================================
+function generateTemplateD(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
+  let itemsHtml = '';
+  let totalSubtotal = 0;
+
+  items.forEach((item) => {
+    const meta = item.meta || {};
+    const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
+    totalSubtotal += itemTotal;
+    itemsHtml += `
+      <tr>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.tanggal || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.tujuan || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_spe || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee;">${meta.armada || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no_pol || '-'}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga_ritase || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.harga_multi_drop || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(meta.reimburse_unloading || 0)}</td>
+        <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: right;">${formatRupiah(itemTotal)}</td>
+      </tr>
+    `;
+  });
+
+  const ppnRate = company?.id === 1 ? 0.11 : 0.011;
+  const ppnAmount = invoice.include_ppn ? (invoice.ppn_amount || Math.round(totalSubtotal * ppnRate)) : 0;
+  const grandTotal = totalSubtotal + ppnAmount;
+  const paidAmount = invoice.paid_amount || 0;
+  const remainingAmount = grandTotal - paidAmount;
+
+  return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'd', bankAccount, showSignature, {
+    tableHeaders: ['No', 'Tanggal', 'Tujuan', 'No. SPE', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Reimburse Unloading', 'Jumlah']
   });
 }

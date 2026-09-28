@@ -36,6 +36,63 @@ export type ImportPreview = {
   errorGroups: number;
 };
 
+// ============ KONVERSI TANGGAL EXCEL ============
+function excelDateToDate(excelDate: number): string {
+  const epoch = new Date(1899, 11, 30);
+  const date = new Date(epoch.getTime() + excelDate * 86400000);
+  
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  
+  return `${day}/${month}/${year}`;
+}
+
+function autoConvertDate(value: any): string {
+  if (!value) return '';
+  
+  const str = String(value).trim();
+  
+  // 1. Kalau angka (Excel date format)
+  if (!isNaN(Number(str)) && str !== '') {
+    const num = Number(str);
+    if (num > 1 && num < 50000) {
+      return excelDateToDate(num);
+    }
+  }
+  
+  // 2. Kalau string dengan format dd/mm/yyyy atau dd-mm-yyyy
+  if (str.includes('/') || str.includes('-')) {
+    let parts = str.split('/');
+    if (parts.length !== 3) parts = str.split('-');
+    
+    if (parts.length === 3) {
+      let d = parts[0].padStart(2, '0');
+      let m = parts[1].padStart(2, '0');
+      let y = parts[2];
+      
+      if (y.length === 2) y = '20' + y;
+      
+      if (d.length === 2 && m.length === 2 && y.length === 4) {
+        return `${d}/${m}/${y}`;
+      }
+    }
+  }
+  
+  // 3. Coba parse dengan Date object
+  try {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+  } catch (e) {}
+  
+  return str;
+}
+
 export async function parseExcelFile(file: File, companyId: number): Promise<ImportPreview> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
@@ -52,7 +109,7 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
     const str = String(col).toLowerCase().trim();
     if (str.includes('tanggal') || str.includes('tgl')) headerMap.tanggal = idx;
     else if (str.includes('keterangan') || str.includes('deskripsi')) headerMap.keterangan = idx;
-    else if (str.includes('coa') || str.includes('akun') || str.includes('nama akun')) headerMap.coa = idx;
+    else if (str.includes('coa') || str.includes('akun') || str.includes('nama akun') || str.includes('nama coa')) headerMap.coa = idx;
     else if (str.includes('debet') || str.includes('debit')) headerMap.debet = idx;
     else if (str.includes('kredit') || str.includes('credit')) headerMap.kredit = idx;
   });
@@ -80,11 +137,25 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
     if (!row || row.length === 0) continue;
     if (row.every(cell => cell === undefined || cell === null || cell === '')) continue;
 
-    const tanggalRaw = String(row[headerMap.tanggal] || '').trim();
+    // 🔥 AUTO CONVERT TANGGAL
+    const tanggalRaw = autoConvertDate(row[headerMap.tanggal]);
+    
     const keterangan = String(row[headerMap.keterangan] || '').trim();
     const namaCoa = String(row[headerMap.coa] || '').trim();
-    const debitRaw = parseFloat(String(row[headerMap.debet] || '0').replace(/[^0-9,-]/g, '').replace(',', '.'));
-    const kreditRaw = parseFloat(String(row[headerMap.kredit] || '0').replace(/[^0-9,-]/g, '').replace(',', '.'));
+    
+    // 🔥 PARSE ANGKA (handle titik & koma)
+    const debitStr = String(row[headerMap.debet] || '0')
+      .replace(/\./g, '')  // hapus titik (pemisah ribuan)
+      .replace(/,/g, '.')   // ganti koma dengan titik (desimal)
+      .replace(/[^0-9.-]/g, ''); // hapus karakter lain
+    
+    const kreditStr = String(row[headerMap.kredit] || '0')
+      .replace(/\./g, '')
+      .replace(/,/g, '.')
+      .replace(/[^0-9.-]/g, '');
+    
+    const debitRaw = parseFloat(debitStr);
+    const kreditRaw = parseFloat(kreditStr);
 
     const debit = isNaN(debitRaw) ? 0 : debitRaw;
     const kredit = isNaN(kreditRaw) ? 0 : kreditRaw;

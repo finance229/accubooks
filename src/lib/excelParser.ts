@@ -36,7 +36,9 @@ export type ImportPreview = {
   errorGroups: number;
 };
 
-// ============ KONVERSI TANGGAL EXCEL ============
+// ============================================================
+// KONVERSI TANGGAL EXCEL
+// ============================================================
 function excelDateToDate(excelDate: number): string {
   const epoch = new Date(1899, 11, 30);
   const date = new Date(epoch.getTime() + excelDate * 86400000);
@@ -49,32 +51,41 @@ function excelDateToDate(excelDate: number): string {
 }
 
 function autoConvertDate(value: any): string {
-  if (!value) return '';
+  if (value === null || value === undefined || value === '') return '';
+  
+  // Kalau sudah Date object
+  if (value instanceof Date) {
+    const day = String(value.getDate()).padStart(2, '0');
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const year = value.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
   
   const str = String(value).trim();
   
-  // 1. Kalau angka (Excel date format)
+  // 1. Kalau angka (Excel date serial)
   if (!isNaN(Number(str)) && str !== '') {
     const num = Number(str);
-    if (num > 1 && num < 50000) {
+    if (num > 1 && num < 100000) {
       return excelDateToDate(num);
     }
   }
   
-  // 2. Kalau string dengan format dd/mm/yyyy atau dd-mm-yyyy
-  if (str.includes('/') || str.includes('-')) {
-    let parts = str.split('/');
-    if (parts.length !== 3) parts = str.split('-');
-    
-    if (parts.length === 3) {
-      let d = parts[0].padStart(2, '0');
-      let m = parts[1].padStart(2, '0');
-      let y = parts[2];
-      
-      if (y.length === 2) y = '20' + y;
-      
-      if (d.length === 2 && m.length === 2 && y.length === 4) {
-        return `${d}/${m}/${y}`;
+  // 2. Format DD/MM/YYYY atau DD-MM-YYYY atau DD.MM.YYYY
+  const separators = ['/', '-', '.'];
+  for (const sep of separators) {
+    if (str.includes(sep)) {
+      const parts = str.split(sep);
+      if (parts.length === 3) {
+        let d = parts[0].trim().padStart(2, '0');
+        let m = parts[1].trim().padStart(2, '0');
+        let y = parts[2].trim();
+        
+        if (y.length === 2) y = '20' + y;
+        
+        if (d.length === 2 && m.length === 2 && y.length === 4 && !isNaN(Number(d)) && !isNaN(Number(m)) && !isNaN(Number(y))) {
+          return `${d}/${m}/${y}`;
+        }
       }
     }
   }
@@ -93,20 +104,125 @@ function autoConvertDate(value: any): string {
   return str;
 }
 
+// ============================================================
+// PARSING ANGKA (ROBUST - HANDLE SEMUA FORMAT)
+// ============================================================
+function parseNumber(value: any): number {
+  if (value === null || value === undefined || value === '') return 0;
+  
+  // Kalau sudah number
+  if (typeof value === 'number') {
+    return isNaN(value) ? 0 : value;
+  }
+  
+  let str = String(value).trim();
+  
+  // Kalau cuma "-" atau "--" atau "- " → return 0
+  if (/^[-–—\s]+$/.test(str) || str === '-') return 0;
+  
+  // Hapus semua karakter kecuali angka, titik, koma, minus
+  str = str.replace(/[^\d.,-]/g, '');
+  
+  if (!str || str === '-' || str === '.' || str === ',') return 0;
+  
+  // Handle minus di depan
+  const isNegative = str.startsWith('-');
+  if (isNegative) str = str.substring(1);
+  
+  const hasDot = str.includes('.');
+  const hasComma = str.includes(',');
+  
+  if (hasDot && hasComma) {
+    const lastDot = str.lastIndexOf('.');
+    const lastComma = str.lastIndexOf(',');
+    
+    if (lastComma > lastDot) {
+      // Indonesia: 1.000.000,50
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US: 1,000,000.50
+      str = str.replace(/,/g, '');
+    }
+  } else if (hasDot) {
+    const parts = str.split('.');
+    
+    if (parts.length > 2) {
+      // 1.000.000 → 1000000
+      str = str.replace(/\./g, '');
+    } else if (parts.length === 2) {
+      const decimal = parts[1];
+      // 🔥 KUNCI: kalau decimal 3 digit → pemisah ribuan
+      if (decimal.length === 3) {
+        str = str.replace(/\./g, '');
+      }
+      // decimal 1-2 digit → biarkan sebagai desimal
+    }
+  } else if (hasComma) {
+    const parts = str.split(',');
+    
+    if (parts.length > 2) {
+      // 1,000,000 → 1000000
+      str = str.replace(/,/g, '');
+    } else if (parts.length === 2) {
+      const decimal = parts[1];
+      if (decimal.length === 3) {
+        str = str.replace(/,/g, '');
+      } else {
+        str = str.replace(',', '.');
+      }
+    }
+  }
+  
+  const num = parseFloat(str);
+  if (isNaN(num)) return 0;
+  return isNegative ? -num : num;
+}
+
+// ============================================================
+// NORMALISASI KETERANGAN (HANDLE MULTI-LINE)
+// ============================================================
+function normalizeKeterangan(str: string): string {
+  if (!str) return '';
+  // Ganti newline, tab, multiple spaces jadi single space
+  return str.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// ============================================================
+// NORMALISASI NAMA COA
+// ============================================================
+function normalizeCoaName(str: string): string {
+  if (!str) return '';
+  return str.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// ============================================================
+// PARSE EXCEL FILE
+// ============================================================
 export async function parseExcelFile(file: File, companyId: number): Promise<ImportPreview> {
   const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: 'array' });
+  const workbook = XLSX.read(buffer, { 
+    type: 'array',
+    cellDates: true,  // 🔥 Convert date cells jadi Date object
+    cellNF: false,
+    cellText: false,
+  });
+  
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const data: any[][] = XLSX.utils.sheet_to_json(sheet, { 
+    header: 1, 
+    raw: true,
+    defval: '',  // 🔥 Default value untuk cell kosong
+    blankrows: false,  // 🔥 Skip baris kosong
+  });
 
   if (data.length < 2) throw new Error('File kosong atau tidak ada data');
 
-  // Cari header
+  // ============ CARI HEADER ============
   const headerRow = data[0];
   const headerMap = { tanggal: -1, keterangan: -1, coa: -1, debet: -1, kredit: -1 };
 
   headerRow.forEach((col: any, idx: number) => {
-    const str = String(col).toLowerCase().trim();
+    const str = String(col || '').toLowerCase().trim();
     if (str.includes('tanggal') || str.includes('tgl')) headerMap.tanggal = idx;
     else if (str.includes('keterangan') || str.includes('deskripsi')) headerMap.keterangan = idx;
     else if (str.includes('coa') || str.includes('akun') || str.includes('nama akun') || str.includes('nama coa')) headerMap.coa = idx;
@@ -114,10 +230,13 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
     else if (str.includes('kredit') || str.includes('credit')) headerMap.kredit = idx;
   });
 
+  console.log('📋 Header Map:', headerMap);
+
   if (Object.values(headerMap).some(v => v === -1)) {
     throw new Error('Header tidak sesuai. Gunakan: Tanggal | KETERANGAN | Nama coa | DEBET | KREDIT');
   }
 
+  // ============ AMBIL COA DARI DB ============
   const suffix = getCompanySuffix(companyId);
   const { data: coaList } = await supabase
     .from('coa')
@@ -128,37 +247,34 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
 
   const coaMap = new Map<string, { id: number; code: string; name: string }>();
   coaList?.forEach(c => {
-    coaMap.set(c.name.toLowerCase().trim(), { id: c.id, code: c.code, name: c.name });
+    const normalizedName = normalizeCoaName(c.name);
+    coaMap.set(normalizedName, { id: c.id, code: c.code, name: c.name });
   });
 
+  console.log(`✅ Loaded ${coaMap.size} COA untuk company ${companyId}`);
+
+  // ============ PARSE SEMUA BARIS ============
   const rows: ImportRow[] = [];
+  
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (!row || row.length === 0) continue;
+    
+    // Skip baris yang benar-benar kosong
     if (row.every(cell => cell === undefined || cell === null || cell === '')) continue;
 
     // 🔥 AUTO CONVERT TANGGAL
     const tanggalRaw = autoConvertDate(row[headerMap.tanggal]);
     
-    const keterangan = String(row[headerMap.keterangan] || '').trim();
+    // 🔥 NORMALISASI KETERANGAN
+    const keteranganRaw = String(row[headerMap.keterangan] || '');
+    const keterangan = normalizeKeterangan(keteranganRaw);
+    
     const namaCoa = String(row[headerMap.coa] || '').trim();
     
-    // 🔥 PARSE ANGKA (handle titik & koma)
-    const debitStr = String(row[headerMap.debet] || '0')
-      .replace(/\./g, '')  // hapus titik (pemisah ribuan)
-      .replace(/,/g, '.')   // ganti koma dengan titik (desimal)
-      .replace(/[^0-9.-]/g, ''); // hapus karakter lain
-    
-    const kreditStr = String(row[headerMap.kredit] || '0')
-      .replace(/\./g, '')
-      .replace(/,/g, '.')
-      .replace(/[^0-9.-]/g, '');
-    
-    const debitRaw = parseFloat(debitStr);
-    const kreditRaw = parseFloat(kreditStr);
-
-    const debit = isNaN(debitRaw) ? 0 : debitRaw;
-    const kredit = isNaN(kreditRaw) ? 0 : kreditRaw;
+    // 🔥 PARSE ANGKA
+    const debit = parseNumber(row[headerMap.debet]);
+    const kredit = parseNumber(row[headerMap.kredit]);
 
     const rowData: ImportRow = {
       rowIndex: i + 1,
@@ -170,38 +286,47 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
       valid: true,
     };
 
+    // Validasi tanggal
     const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
     if (!dateRegex.test(tanggalRaw)) {
       rowData.valid = false;
       rowData.error = 'Format tanggal harus DD/MM/YYYY';
     }
 
-    const coaKey = namaCoa.toLowerCase().trim();
+    // Cari COA
+    const coaKey = normalizeCoaName(namaCoa);
     const coa = coaMap.get(coaKey);
     if (!coa) {
       rowData.valid = false;
-      rowData.error = rowData.error ? `${rowData.error}; COA tidak ditemukan` : 'COA tidak ditemukan';
+      rowData.error = rowData.error ? `${rowData.error}; COA tidak ditemukan: "${namaCoa}"` : `COA tidak ditemukan: "${namaCoa}"`;
     } else {
       rowData.coaId = coa.id;
       rowData.coaCode = coa.code;
       rowData.coaName = coa.name;
     }
 
+    // Validasi Debit/Kredit
     if (debit === 0 && kredit === 0) {
       rowData.valid = false;
       rowData.error = rowData.error ? `${rowData.error}; Debit & Kredit 0` : 'Debit & Kredit 0';
     }
     if (debit > 0 && kredit > 0) {
       rowData.valid = false;
-      rowData.error = rowData.error ? `${rowData.error}; Tidak boleh debit & kredit berisi positif` : 'Tidak boleh debit & kredit berisi positif';
+      rowData.error = rowData.error ? `${rowData.error}; Tidak boleh debit & kredit positif bersamaan` : 'Tidak boleh debit & kredit positif bersamaan';
     }
 
     rows.push(rowData);
   }
 
+  console.log(`📊 Total rows parsed: ${rows.length}`);
+
+  // ============ GROUPING ============
   const groupMap = new Map<string, ImportGroup>();
+  
   rows.forEach(row => {
-    const key = `${row.tanggal}|${row.keterangan}`;
+    // 🔥 KEY = tanggal + keterangan yang sudah dinormalisasi
+    const key = `${row.tanggal}|||${row.keterangan}`;
+    
     if (!groupMap.has(key)) {
       groupMap.set(key, {
         key,
@@ -213,6 +338,7 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
         valid: true,
       });
     }
+    
     const group = groupMap.get(key)!;
     group.rows.push(row);
     group.totalDebit += row.debit;
@@ -220,15 +346,33 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
   });
 
   const groups = Array.from(groupMap.values());
+  
+  console.log(`📊 Total groups: ${groups.length}`);
+  
+  // Validasi grup
   groups.forEach(group => {
-    if (group.totalDebit !== group.totalCredit) {
+    // Cek total debit = kredit
+    if (Math.abs(group.totalDebit - group.totalCredit) > 1) { // toleransi 1 rupiah
       group.valid = false;
-      group.error = `Total Debit (${group.totalDebit}) tidak sama dengan Total Kredit (${group.totalCredit})`;
+      group.error = `Total Debit (${group.totalDebit.toLocaleString('id-ID')}) ≠ Total Kredit (${group.totalCredit.toLocaleString('id-ID')})`;
     }
-    if (group.rows.some(r => !r.valid)) {
+    
+    // Cek ada baris error
+    const errorRows = group.rows.filter(r => !r.valid);
+    if (errorRows.length > 0) {
       group.valid = false;
-      group.error = group.error || 'Ada baris yang error';
+      const errorMsgs = errorRows.map(r => `Baris ${r.rowIndex}: ${r.error}`).join(' | ');
+      group.error = group.error ? `${group.error} | ${errorMsgs}` : errorMsgs;
     }
+  });
+
+  // 🔥 DEBUG: Log grup yang error
+  groups.filter(g => !g.valid).forEach(g => {
+    console.log(`❌ Group ERROR: [${g.tanggal}] ${g.keterangan}`);
+    console.log(`   Rows: ${g.rows.length}, Debit: ${g.totalDebit}, Kredit: ${g.totalCredit}`);
+    g.rows.forEach(r => {
+      console.log(`   - ${r.namaCoa} | D: ${r.debit} | K: ${r.kredit} | ${r.valid ? '✅' : '❌ ' + r.error}`);
+    });
   });
 
   return {
@@ -241,6 +385,9 @@ export async function parseExcelFile(file: File, companyId: number): Promise<Imp
   };
 }
 
+// ============================================================
+// GENERATE TEMPLATE EXCEL
+// ============================================================
 export function generateTemplateExcel(): Blob {
   const headers = ['Tanggal', 'KETERANGAN', 'Nama coa', 'DEBET', 'KREDIT'];
   const exampleRows = [
@@ -248,6 +395,9 @@ export function generateTemplateExcel(): Blob {
     ['01/01/2025', 'Jurnal contoh 1', 'Pendapatan Jasa', 0, 1000000],
     ['02/01/2025', 'Jurnal contoh 2', 'Peralatan', 500000, 0],
     ['02/01/2025', 'Jurnal contoh 2', 'Kas', 0, 500000],
+    ['03/01/2025', 'Jurnal dengan PPh', 'Beban Jasa', 1000000, 0],
+    ['03/01/2025', 'Jurnal dengan PPh', 'Utang PPh 23', 0, 20000],
+    ['03/01/2025', 'Jurnal dengan PPh', 'Kas', 0, 980000],
   ];
 
   const wsData = [headers, ...exampleRows];

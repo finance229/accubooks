@@ -24,6 +24,7 @@ export function generateKwitansiHTML(
     return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
+  // 🔥 TERBILANG - HURUF
   function terbilang(angka: number): string {
     if (angka === 0) return 'Nol';
     if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
@@ -97,9 +98,18 @@ export function generateKwitansiHTML(
   const ppn = invoice.ppn || 0;
   const grandTotal = invoice.total || totalSubtotal + ppn;
 
-  // 🔥🔥🔥 BANK - HANYA SEKALI 🔥🔥🔥
-  const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
-  const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
+  // 🔥 LOGIKA PEMBERSIH REKENING (ANTI DOBEL & ANTI NULL)
+  let rawBankName = bankAccount?.name || 'Bank';
+  let rawAccountNo = bankAccount?.account_number || '';
+
+  // Hapus awalan "Bank " jika ada (biar ga jadi "Bank Bank Mandiri")
+  let cleanBankName = rawBankName.replace(/^Bank\s+/i, '').trim();
+  
+  // Format nama bank
+  const bankName = `Bank ${cleanBankName}`;
+  
+  // Format rekening: Jika ada nomornya, tampilkan. Jika kosong, sembunyikan stripnya.
+  const bankAccountNo = rawAccountNo ? ` - ${rawAccountNo}` : '';
 
   const terbilangText = terbilang(Math.round(grandTotal));
 
@@ -207,11 +217,11 @@ export function generateKwitansiHTML(
       <strong>Terbilang:</strong> ${terbilangText}
     </div>
 
-        <div class="footer">
+    <div class="footer">
       <div class="left">
         <div>${payment?.payment_method ? `Metode: ${payment.payment_method}` : '-'}</div>
-        <div>${bankName} - ${bankAccountNo}</div>
-        <div>Account Name: ${company?.name || ''}</div>
+        <div>${bankName}${bankAccountNo}</div>
+        <div>a.n. ${company?.name || ''}</div>
       </div>
       <div class="signature-area">
         <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;">Hormat Kami,</div>
@@ -222,7 +232,7 @@ export function generateKwitansiHTML(
           }
         </div>
         <div class="line"></div>
-        <div class="name">${company?.director || 'Adis Nugroho Santoso'}</div>
+        <div class="name">${company?.director || 'Direktur'}</div>
         <div class="title">Direktur Utama</div>
         <div class="date">${formatDate(new Date().toISOString())}</div>
       </div>

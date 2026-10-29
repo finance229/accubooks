@@ -232,12 +232,11 @@ function generateBaseHTML(
         Terbilang: <span style="font-weight: normal; text-transform: capitalize;">${terbilangText}</span>
       </div>
       
-      <div class="payment-section">
+           <div class="payment-section">
         <div class="payment-title">PAYMENT METHODS</div>
         <div class="payment-details">
           ${bankName} - ${bankAccountNo}<br>
-          Account Name: ${company?.name || 'PT Artha Kondang Internasional'}<br>
-          Swift Code: ${swiftCode}
+          Account Name: ${company?.name || 'PT Artha Kondang Internasional'}
         </div>
       </div>
       

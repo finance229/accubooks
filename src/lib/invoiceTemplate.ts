@@ -423,6 +423,8 @@ function generateTemplateD(invoice: any, company: any, customer: any, items: any
     const meta = item.meta || {};
     const itemTotal = (item.quantity || 0) * (item.unit_price || 0);
     totalSubtotal += itemTotal;
+    
+    // 🔥 FIX: Kolom DESCRIPTION dihilangkan, diganti dengan 'No'
     itemsHtml += `
       <tr>
         <td style="padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #eee; text-align: center;">${meta.no || '-'}</td>
@@ -446,6 +448,7 @@ function generateTemplateD(invoice: any, company: any, customer: any, items: any
   const remainingAmount = grandTotal - paidAmount;
 
   return generateBaseHTML(invoice, company, customer, itemsHtml, totalSubtotal, ppnAmount, grandTotal, paidAmount, remainingAmount, 'd', bankAccount, showSignature, {
+    // 🔥 FIX: Header diganti dari 'DESCRIPTION' menjadi 'No'
     tableHeaders: ['No', 'Tanggal', 'Tujuan', 'No. SPE', 'Armada', 'No. Pol', 'Harga Ritase', 'Harga Multi Drop', 'Reimburse Unloading', 'Jumlah']
   });
 }

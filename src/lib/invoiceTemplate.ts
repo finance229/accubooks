@@ -37,6 +37,7 @@ function formatDate(date: string) {
   return `${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+// 🔥 TERBILANG - HURUF (SUPPORT MILYAR)
 function terbilang(angka: number): string {
   if (angka === 0) return 'Nol';
   if (angka < 0) return 'Minus ' + terbilang(Math.abs(angka));
@@ -122,9 +123,18 @@ function generateBaseHTML(
 
   const ppnLabel = company?.id === 1 ? 'PPN 11%' : 'PPN 1.1%';
   
-  const bankName = bankAccount?.name || company?.bank_name || 'Bank Mandiri';
-  const bankAccountNo = bankAccount?.account_number || company?.bank_account || '1010000777068';
-  const swiftCode = company?.swift_code || 'BMRIIDJXXX';
+  // 🔥 LOGIKA PEMBERSIH REKENING (ANTI DOBEL & ANTI NULL)
+  let rawBankName = bankAccount?.name || 'Bank';
+  let rawAccountNo = bankAccount?.account_number || '';
+
+  // Hapus awalan "Bank " jika ada (biar ga jadi "Bank Bank Mandiri")
+  let cleanBankName = rawBankName.replace(/^Bank\s+/i, '').trim();
+  
+  // Format nama bank
+  const bankName = `Bank ${cleanBankName}`;
+  
+  // Format rekening: Jika ada nomornya, tampilkan. Jika kosong, sembunyikan stripnya.
+  const bankAccountNo = rawAccountNo ? ` - ${rawAccountNo}` : '';
 
   const terbilangText = terbilang(Math.round(grandTotal));
 
@@ -232,10 +242,10 @@ function generateBaseHTML(
         Terbilang: <span style="font-weight: normal; text-transform: capitalize;">${terbilangText}</span>
       </div>
       
-           <div class="payment-section">
+      <div class="payment-section">
         <div class="payment-title">PAYMENT METHODS</div>
         <div class="payment-details">
-          ${bankName} - ${bankAccountNo}<br>
+          ${bankName}${bankAccountNo}<br>
           Account Name: ${company?.name || 'PT Artha Kondang Internasional'}
         </div>
       </div>
@@ -245,7 +255,7 @@ function generateBaseHTML(
           `<img src="${company.signature_url}" class="signature-img" />` : 
           showSignature ? `<div class="signature-line"></div>` : ''
         }
-        <div class="signature-name">${company?.director || 'Adis Nugroho Santoso'}</div>
+        <div class="signature-name">${company?.director || 'Direktur'}</div>
         <div class="signature-title">Direktur Utama</div>
       </div>
     </div>
@@ -294,7 +304,7 @@ function generateTemplateGeneral(invoice: any, company: any, customer: any, item
 }
 
 // ============================================================
-// TEMPLATE A - YCH
+// TEMPLATE A (YCH)
 // ============================================================
 function generateTemplateA(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -331,7 +341,7 @@ function generateTemplateA(invoice: any, company: any, customer: any, items: any
 }
 
 // ============================================================
-// TEMPLATE B - BALIKAN
+// TEMPLATE B (BALIKAN)
 // ============================================================
 function generateTemplateB(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -367,7 +377,7 @@ function generateTemplateB(invoice: any, company: any, customer: any, items: any
 }
 
 // ============================================================
-// TEMPLATE C - Mowilex
+// TEMPLATE C (Mowilex)
 // ============================================================
 function generateTemplateC(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
@@ -403,7 +413,7 @@ function generateTemplateC(invoice: any, company: any, customer: any, items: any
 }
 
 // ============================================================
-// TEMPLATE D - Mayora
+// TEMPLATE D (Mayora)
 // ============================================================
 function generateTemplateD(invoice: any, company: any, customer: any, items: any[], bankAccount?: any, showSignature?: boolean) {
   let itemsHtml = '';
